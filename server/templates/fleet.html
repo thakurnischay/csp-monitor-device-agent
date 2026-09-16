@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Fleet - CSP Device Monitor{% endblock %}
+{% block body %}
+<h1>CSP Fleet</h1>
+<p class="note">Live device status of every registered CSP. Online = reported within the last {{ window }} minutes.</p>
+
+<div class="cards">
+  <div class="card"><div class="v">{{ total }}</div><div class="l">Total CSPs</div></div>
+  <div class="card"><div class="v" style="color:var(--ok)">{{ online }}</div><div class="l">Online</div></div>
+  <div class="card"><div class="v" style="color:var(--bad)">{{ printer_problems }}</div><div class="l">Printer problems</div></div>
+  <div class="card"><div class="v" style="color:var(--bad)">{{ microatm_problems }}</div><div class="l">Micro-ATM problems</div></div>
+</div>
+
+<table>
+  <thead><tr><th>Status</th><th>CSP</th><th>Code</th><th>Printer</th><th>Micro-ATM</th><th>Last seen (IST)</th></tr></thead>
+  <tbody>
+  {% for c in csps %}
+    <tr>
+      <td>{% if c.online %}<span class="pill ok">online</span>{% else %}<span class="pill off">offline</span>{% endif %}</td>
+      <td><a class="row" href="{{ url_for('ui.csp_detail', csp_id=c.csp_id) }}">{{ c.name or '-' }}</a></td>
+      <td>{{ c.csp_id }}</td>
+      <td>
+        {% if not c.printer_configured %}<span class="pill off">not set up</span>
+        {% elif c.printer_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+        {% if c.printer_test_ran %}<div class="note" style="font-size:0.78rem;margin-top:2px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
+      </td>
+      <td>
+        {% if not c.microatm_configured %}<span class="pill off">not set up</span>
+        {% elif c.microatm_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+      </td>
+      <td>{{ c.last_seen | ist }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="note">No CSP has reported yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

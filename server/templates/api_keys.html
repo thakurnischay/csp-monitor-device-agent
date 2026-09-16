@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}API Keys - CSP Device Monitor{% endblock %}
+{% block body %}
+<h1>API Keys</h1>
+<p class="note">Issue a key for each CSP before its agent can report. Shown in full only once, right here.</p>
+
+{% if new_key %}
+<div class="panel" style="border-color:var(--ok)">
+  <strong>{{ new_key.csp_id }}</strong> — copy this now, it will not be shown again:<br>
+  <code style="word-break:break-all">{{ new_key.api_key }}</code>
+</div>
+{% endif %}
+
+<div class="panel">
+  <form class="inline" method="post">
+    <input type="hidden" name="action" value="issue">
+    <input name="csp_id" placeholder="CSP code (e.g. 1AB50895)" required>
+    <input name="name" placeholder="CSP name (e.g. Testpur CSP)">
+    <button type="submit">Issue / rotate key</button>
+  </form>
+</div>
+
+<table>
+  <thead><tr><th>Code</th><th>Name</th><th>Key (last 4)</th><th>Status</th><th>Created</th><th></th></tr></thead>
+  <tbody>
+  {% for k in keys %}
+    <tr>
+      <td>{{ k.csp_id }}</td>
+      <td>{{ k.name or '-' }}</td>
+      <td>…{{ k.api_key[-4:] }}</td>
+      <td>{% if k.active %}<span class="pill ok">active</span>{% else %}<span class="pill off">revoked</span>{% endif %}</td>
+      <td>{{ k.created_at }}</td>
+      <td>
+        <form class="inline" method="post" style="display:inline">
+          <input type="hidden" name="action" value="toggle">
+          <input type="hidden" name="csp_id" value="{{ k.csp_id }}">
+          <button type="submit">{{ "Revoke" if k.active else "Reactivate" }}</button>
+        </form>
+        <form class="inline" method="post" style="display:inline" onsubmit="return confirm('Remove {{ k.csp_id }} entirely?')">
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="csp_id" value="{{ k.csp_id }}">
+          <button type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="note">No keys issued yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

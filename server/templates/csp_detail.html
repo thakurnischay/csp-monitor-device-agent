@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name or c.csp_id }} - CSP Device Monitor{% endblock %}
+{% block body %}
+<p class="note"><a href="{{ url_for('ui.fleet') }}" style="color:var(--accent)">&larr; Fleet</a></p>
+<h1>{{ c.name or c.csp_id }}</h1>
+<p class="note">Code {{ c.csp_id }} &middot;
+  {% if c.online %}<span class="pill ok">online</span>{% else %}<span class="pill off">offline</span>{% endif %}
+  &middot; last seen {{ c.last_seen | ist }}</p>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Passbook printer</h2>
+  {% if not c.printer_configured %}<span class="pill off">not set up on CSP side</span>
+  {% elif c.printer_ok %}<span class="pill ok">ok</span>
+  {% else %}<span class="pill bad">problem</span>{% endif %}
+  <span class="note">{{ c.printer_status or '' }}</span>
+  {% if c.printer_test_ran %}
+  <p class="note">Test print ({{ c.printer_test_checked_at | ist }}):
+    {% if c.printer_test_ok %}<span class="pill ok">ok</span>
+    {% else %}<span class="pill bad">problem</span>{% endif %}
+    {{ c.printer_test_detail or '' }}
+  </p>
+  {% else %}
+  <p class="note">Test print: not available yet.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Micro-ATM</h2>
+  {% if not c.microatm_configured %}<span class="pill off">not set up on CSP side</span>
+  {% elif c.microatm_ok %}<span class="pill ok">ok</span>
+  {% else %}<span class="pill bad">problem</span>{% endif %}
+  <span class="note">{{ c.microatm_status or '' }}</span>
+</div>
+
+<p class="note">Printer/micro-ATM status above is a connectivity check (device
+  present, not reporting an error). The printer also gets one real test print
+  a day to catch paper-out/jam/door-open issues the connectivity check can't
+  see; the micro-ATM has no safe way to test a real transaction, so it stays
+  connectivity-only.</p>
+{% endblock %}

@@ -1,0 +1,32 @@
+CSP Device Monitor — Setup Instructions
+========================================
+
+You should have been given, separately, a CSP Code and an API key.
+If you don't have these, contact your admin before continuing.
+
+IMPORTANT — do this first:
+   You must EXTRACT this zip file into a real folder before running
+   anything inside it. Do NOT double-click SETUP.bat while it is still
+   shown inside the zip file's own window — it will fail.
+
+   How to extract:
+     1. Right-click the zip file (the one this came in).
+     2. Choose "Extract All..." (Windows) or "Extract Here" (WinRAR/7-Zip).
+     3. Open the new FOLDER that was created (not the zip itself).
+
+Steps (from inside the extracted folder):
+1. Double-click SETUP.bat and wait for it to finish.
+   - If Python isn't already on this PC, SETUP.bat downloads and installs
+     it automatically — no action needed from you, just wait.
+2. A page opens in your browser automatically. On it:
+   - Server URL: the address you were given
+   - CSP Code and API key: from your admin
+   - Pick which printer is your passbook printer, and which USB device
+     is your micro-ATM, from the two dropdowns
+   - Click "Save device selection" and "Save connection"
+
+That's it — the agent now runs in the background automatically, even
+after you restart your PC, and reports your printer/micro-ATM status
+every few minutes. You don't need to do anything else.
+
+To check it's working any time, open http://127.0.0.1:5057 again.
