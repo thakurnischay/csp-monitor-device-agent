@@ -87,9 +87,9 @@ _VIRTUAL_PRINTER_HINTS = (
 # a device that isn't from a recognized brand, which still needs a human's
 # one-time pick (see resolve_printer/resolve_microatm below).
 _KNOWN_PRINTER_BRANDS = (
-    "tvs", "wep", "epson tm", "epson l1c", "epson lx", "gprs", "passbook",
-    "troy", "godex", "genicom", "olivetti bp", "posiflex", "citizen ct-s",
-    "custom vkp", "star tsp", "hasman", "svp",
+    "tvs", "wep", "epson tm", "epson l1c", "epson lx", "epson plq", "gprs",
+    "passbook", "troy", "godex", "genicom", "olivetti bp", "posiflex",
+    "citizen ct-s", "custom vkp", "star tsp", "hasman", "svp",
 )
 _KNOWN_MICROATM_BRANDS = (
     "ingenico", "ezetap", "mswipe", "morefun", "bijlipay", "spice digital",

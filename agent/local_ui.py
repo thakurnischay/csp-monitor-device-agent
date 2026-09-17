@@ -44,15 +44,17 @@ PAGE = """
   <div id="printerAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <div id="printerFunctionalNote" style="color:#555;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which printer is it?</label>
-  <div style="color:#666;font-size:0.82rem;margin-bottom:4px">The agent fills this in automatically when it recognizes a known printer brand - checking both installed Windows printers and USB/serial (COM port) devices, since many passbook printers connect that way instead. If it can't recognize the brand, every real printer and serial device it finds is still listed below to pick manually (or leave it as "not selected" if this PC has no physical passbook printer). Once a day it also sends a real test page to catch things like out-of-paper or a paper jam.</div>
-  <select id="printerSelect"></select>
+  <div style="color:#666;font-size:0.82rem;margin-bottom:4px">The agent fills this in automatically when it recognizes a known printer brand - checking both installed Windows printers and USB/serial (COM port) devices, since many passbook printers connect that way instead. If it can't recognize the brand, every real printer and serial device it finds is offered below to pick from - and if the scan itself can't run at all (e.g. blocked by antivirus/Smart App Control), you can type the exact device name here yourself instead. Leave it blank if this PC has no physical passbook printer. Once a day it also sends a real test page to catch things like out-of-paper or a paper jam.</div>
+  <input id="printerSelect" list="printerOptions" placeholder="Pick from the list, or type the exact device name">
+  <datalist id="printerOptions"></datalist>
 
   <div class="row" style="margin-top:14px"><span><strong>Micro-ATM</strong></span><span id="microatmBadge" class="badge off">checking...</span></div>
   <div id="microatmDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
   <div id="microatmAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which USB device is it?</label>
-  <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Also filled in automatically for known micro-ATM brands - pick one here only if it can't recognize your device, or leave "not selected" if this PC has no micro-ATM.</div>
-  <select id="microatmSelect"></select>
+  <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Also filled in automatically for known micro-ATM brands. If it can't recognize your device, pick from the list, or type the exact device name yourself if the scan can't run at all. Leave it blank if this PC has no micro-ATM.</div>
+  <input id="microatmSelect" list="microatmOptions" placeholder="Pick from the list, or type the exact device name">
+  <datalist id="microatmOptions"></datalist>
 
   <button onclick="saveDevices()">Save device selection</button>
 </div>
@@ -138,23 +140,20 @@ function functionalNote(id, ft) {
   if (!r.ran) { el.textContent = "Test print (" + ft.date + "): " + (r.detail || "skipped"); return; }
   el.textContent = "Test print (" + ft.date + "): " + (r.ok ? "OK - " : "PROBLEM - ") + (r.detail || "");
 }
-function fillSelect(sel, options, current) {
-  sel.innerHTML = "";
-  var blank = document.createElement("option");
-  blank.value = ""; blank.textContent = "-- not selected --";
-  sel.appendChild(blank);
-  var found = false;
+function fillSelect(inputEl, datalistEl, options, current) {
+  // A plain <input list="..."> combo box, not a rigid <select>: shows
+  // whatever the scan found as suggestions, but ALWAYS lets someone type the
+  // exact device name directly - essential when the scan can't run at all
+  // (blocked by Smart App Control/antivirus) and finds literally nothing.
+  datalistEl.innerHTML = "";
   for (var i = 0; i < (options || []).length; i++) {
-    var name = options[i];
     var o = document.createElement("option");
-    o.value = name; o.textContent = name;
-    if (name === current) { o.selected = true; found = true; }
-    sel.appendChild(o);
+    o.value = options[i];
+    datalistEl.appendChild(o);
   }
-  if (current && !found) {
-    var o2 = document.createElement("option");
-    o2.value = current; o2.textContent = current + " (not currently detected)"; o2.selected = true;
-    sel.appendChild(o2);
+  // Never overwrite text the person is actively typing.
+  if (document.activeElement !== inputEl) {
+    inputEl.value = current || "";
   }
 }
 function loadStatus() {
@@ -168,8 +167,8 @@ function loadStatus() {
     badge("printerBadge", "printerDetail", d.printer, "printerAutoNote", d.config.printer_name);
     badge("microatmBadge", "microatmDetail", d.microatm, "microatmAutoNote", d.config.microatm_name);
     functionalNote("printerFunctionalNote", d.printer_functional_test);
-    fillSelect(document.getElementById("printerSelect"), d.available_printers, d.config.printer_name);
-    fillSelect(document.getElementById("microatmSelect"), d.available_usb_devices, d.config.microatm_name);
+    fillSelect(document.getElementById("printerSelect"), document.getElementById("printerOptions"), d.available_printers, d.config.printer_name);
+    fillSelect(document.getElementById("microatmSelect"), document.getElementById("microatmOptions"), d.available_usb_devices, d.config.microatm_name);
     document.getElementById("serverUrl").value = d.config.server_url || "";
     document.getElementById("cspId").value = d.config.csp_id || "";
     document.getElementById("softwareProcess").value = d.config.software_process || "";
