@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Audit Log - CSP Device Monitor{% endblock %}
+{% block body %}
+<h1>Admin Audit Log</h1>
+<p class="note" style="margin-top:4px">Most recent 200 administrative actions - logins and API-key lifecycle changes. Never records passwords or full API keys.</p>
+<table>
+  <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>CSP</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td class="note" title="{{ r.occurred_at | ist }}">{{ r.occurred_at | relative_time }}</td>
+      <td>{{ r.actor }}</td>
+      <td><span class="badge badge-gray">{{ r.action }}</span></td>
+      <td>{{ r.target_csp or '-' }}</td>
+      <td class="note">{{ r.detail or '' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="note">No admin actions recorded yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

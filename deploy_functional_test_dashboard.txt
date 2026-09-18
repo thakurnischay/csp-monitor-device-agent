@@ -1,0 +1,296 @@
+cd ~/pranjal/server
+python3 - << 'PYEOF'
+import re
+
+# ---------- schema.sql: add new columns (for any FUTURE fresh install) ----------
+with open('schema.sql') as f:
+    c = f.read()
+before = c
+old_csps = """CREATE TABLE IF NOT EXISTS csps (
+    csp_id              TEXT PRIMARY KEY,
+    name                TEXT,
+    printer_configured  INTEGER NOT NULL DEFAULT 0,
+    printer_ok          INTEGER NOT NULL DEFAULT 0,
+    printer_status      TEXT,
+    microatm_configured INTEGER NOT NULL DEFAULT 0,
+    microatm_ok         INTEGER NOT NULL DEFAULT 0,
+    microatm_status     TEXT,
+    first_seen          TEXT,
+    last_seen           TEXT
+);"""
+new_csps = """CREATE TABLE IF NOT EXISTS csps (
+    csp_id              TEXT PRIMARY KEY,
+    name                TEXT,
+    printer_configured  INTEGER NOT NULL DEFAULT 0,
+    printer_ok          INTEGER NOT NULL DEFAULT 0,
+    printer_status      TEXT,
+    microatm_configured INTEGER NOT NULL DEFAULT 0,
+    microatm_ok         INTEGER NOT NULL DEFAULT 0,
+    microatm_status     TEXT,
+    printer_test_ran         INTEGER NOT NULL DEFAULT 0,
+    printer_test_ok          INTEGER NOT NULL DEFAULT 0,
+    printer_test_detail      TEXT,
+    printer_test_checked_at  TEXT,
+    first_seen          TEXT,
+    last_seen           TEXT
+);"""
+if old_csps not in c:
+    print("WARNING: schema.sql csps table pattern not found, no change made")
+else:
+    c = c.replace(old_csps, new_csps)
+if c == before:
+    print("schema.sql: NOTHING CHANGED")
+else:
+    with open('schema.sql', 'w') as f:
+        f.write(c)
+    print("schema.sql patched OK")
+
+# ---------- db.py: migrate the LIVE existing DB (ALTER TABLE ADD COLUMN) ----------
+with open('db.py') as f:
+    c = f.read()
+before = c
+old_setup = '''def setup():
+    with get_connection() as conn:
+        with open(SCHEMA, "r", encoding="utf-8") as f:
+            conn.executescript(f.read())
+        cur = conn.execute("SELECT COUNT(*) c FROM admin_users").fetchone()
+        if cur["c"] == 0:
+            from auth import hash_password
+            conn.execute(
+                "INSERT INTO admin_users (login_id, password, created_at) VALUES (?,?,?)",
+                ("admin", hash_password("admin123"), _now()))
+        conn.commit()'''
+new_setup = '''def _migrate_csps_columns(conn):
+    """Add any csps columns introduced after this DB was first created, via
+    ALTER TABLE ADD COLUMN - skipped if the column already exists. Safe to
+    run on every startup, including against an already-migrated DB."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(csps)").fetchall()}
+    new_columns = {
+        "printer_test_ran": "INTEGER NOT NULL DEFAULT 0",
+        "printer_test_ok": "INTEGER NOT NULL DEFAULT 0",
+        "printer_test_detail": "TEXT",
+        "printer_test_checked_at": "TEXT",
+    }
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE csps ADD COLUMN {col_name} {col_type}")
+
+
+def setup():
+    with get_connection() as conn:
+        with open(SCHEMA, "r", encoding="utf-8") as f:
+            conn.executescript(f.read())
+        cur = conn.execute("SELECT COUNT(*) c FROM admin_users").fetchone()
+        if cur["c"] == 0:
+            from auth import hash_password
+            conn.execute(
+                "INSERT INTO admin_users (login_id, password, created_at) VALUES (?,?,?)",
+                ("admin", hash_password("admin123"), _now()))
+        _migrate_csps_columns(conn)
+        conn.commit()'''
+if old_setup not in c:
+    print("WARNING: db.py setup() pattern not found, no change made")
+else:
+    c = c.replace(old_setup, new_setup)
+if c == before:
+    print("db.py: NOTHING CHANGED")
+else:
+    with open('db.py', 'w') as f:
+        f.write(c)
+    print("db.py patched OK")
+
+# ---------- api.py: accept + store printer_functional_test from the agent ----------
+with open('api.py') as f:
+    c = f.read()
+before = c
+old_report = '''@api_bp.route("/api/report", methods=["POST"])
+def report():
+    key = request.headers.get("X-API-Key", "")
+    body = request.get_json(silent=True) or {}
+    csp_id = str(body.get("csp_id") or "").strip()
+
+    with get_connection() as conn:
+        if not _valid_key(conn, csp_id, key):
+            return jsonify({"ok": False, "error": "invalid csp_id or API key"}), 401
+
+        printer = body.get("printer") or {}
+        microatm = body.get("microatm") or {}
+        now = _now()
+
+        # The admin-set label (from Issue Key) is authoritative display name.
+        label_row = conn.execute("SELECT name FROM api_keys WHERE csp_id=?", (csp_id,)).fetchone()
+        name = (label_row["name"] if label_row else "") or ""
+
+        exists = conn.execute("SELECT csp_id FROM csps WHERE csp_id=?", (csp_id,)).fetchone()
+        params = (
+            name,
+            _bool(printer, "configured"), _bool(printer, "ok"), _text(printer, "status"),
+            _bool(microatm, "configured"), _bool(microatm, "ok"), _text(microatm, "status"),
+        )
+        if exists:
+            conn.execute(
+                """UPDATE csps SET name=?,
+                       printer_configured=?, printer_ok=?, printer_status=?,
+                       microatm_configured=?, microatm_ok=?, microatm_status=?,
+                       last_seen=? WHERE csp_id=?""",
+                params + (now, csp_id))
+        else:
+            conn.execute(
+                """INSERT INTO csps (csp_id, name,
+                       printer_configured, printer_ok, printer_status,
+                       microatm_configured, microatm_ok, microatm_status,
+                       first_seen, last_seen)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (csp_id,) + params + (now, now))
+        conn.commit()
+    return jsonify({"ok": True, "received_at": now})'''
+new_report = '''@api_bp.route("/api/report", methods=["POST"])
+def report():
+    key = request.headers.get("X-API-Key", "")
+    body = request.get_json(silent=True) or {}
+    csp_id = str(body.get("csp_id") or "").strip()
+
+    with get_connection() as conn:
+        if not _valid_key(conn, csp_id, key):
+            return jsonify({"ok": False, "error": "invalid csp_id or API key"}), 401
+
+        printer = body.get("printer") or {}
+        microatm = body.get("microatm") or {}
+        functional = body.get("printer_functional_test") or {}
+        now = _now()
+
+        # The admin-set label (from Issue Key) is authoritative display name.
+        label_row = conn.execute("SELECT name FROM api_keys WHERE csp_id=?", (csp_id,)).fetchone()
+        name = (label_row["name"] if label_row else "") or ""
+
+        exists = conn.execute("SELECT csp_id FROM csps WHERE csp_id=?", (csp_id,)).fetchone()
+        test_ran = _bool(functional, "ran")
+        params = (
+            name,
+            _bool(printer, "configured"), _bool(printer, "ok"), _text(printer, "status"),
+            _bool(microatm, "configured"), _bool(microatm, "ok"), _text(microatm, "status"),
+            test_ran, _bool(functional, "ok"), _text(functional, "detail", 300),
+        )
+        if exists:
+            conn.execute(
+                """UPDATE csps SET name=?,
+                       printer_configured=?, printer_ok=?, printer_status=?,
+                       microatm_configured=?, microatm_ok=?, microatm_status=?,
+                       printer_test_ran=?, printer_test_ok=?, printer_test_detail=?,
+                       printer_test_checked_at=CASE WHEN ?=1 THEN ? ELSE printer_test_checked_at END,
+                       last_seen=? WHERE csp_id=?""",
+                params + (test_ran, now, now, csp_id))
+        else:
+            conn.execute(
+                """INSERT INTO csps (csp_id, name,
+                       printer_configured, printer_ok, printer_status,
+                       microatm_configured, microatm_ok, microatm_status,
+                       printer_test_ran, printer_test_ok, printer_test_detail, printer_test_checked_at,
+                       first_seen, last_seen)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (csp_id,) + params + (now if test_ran else None, now, now))
+        conn.commit()
+    return jsonify({"ok": True, "received_at": now})'''
+if old_report not in c:
+    print("WARNING: api.py report() pattern not found, no change made")
+else:
+    c = c.replace(old_report, new_report)
+if c == before:
+    print("api.py: NOTHING CHANGED")
+else:
+    with open('api.py', 'w') as f:
+        f.write(c)
+    print("api.py patched OK")
+
+# ---------- fleet.html: small test-print note under the printer pill ----------
+with open('templates/fleet.html') as f:
+    c = f.read()
+before = c
+old_td = """      <td>
+        {% if not c.printer_configured %}<span class="pill off">not set up</span>
+        {% elif c.printer_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+      </td>"""
+new_td = """      <td>
+        {% if not c.printer_configured %}<span class="pill off">not set up</span>
+        {% elif c.printer_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+        {% if c.printer_test_ran %}<div class="note" style="font-size:0.78rem;margin-top:2px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
+      </td>"""
+if old_td not in c:
+    print("WARNING: fleet.html printer cell pattern not found, no change made")
+else:
+    c = c.replace(old_td, new_td)
+if c == before:
+    print("fleet.html: NOTHING CHANGED")
+else:
+    with open('templates/fleet.html', 'w') as f:
+        f.write(c)
+    print("fleet.html patched OK")
+
+# ---------- csp_detail.html: full test-print detail on the CSP page ----------
+with open('templates/csp_detail.html') as f:
+    c = f.read()
+before = c
+old_panel = '''<div class="panel">
+  <h2 style="font-size:1.05rem">Passbook printer</h2>
+  {% if not c.printer_configured %}<span class="pill off">not set up on CSP side</span>
+  {% elif c.printer_ok %}<span class="pill ok">ok</span>
+  {% else %}<span class="pill bad">problem</span>{% endif %}
+  <span class="note">{{ c.printer_status or '' }}</span>
+</div>'''
+new_panel = '''<div class="panel">
+  <h2 style="font-size:1.05rem">Passbook printer</h2>
+  {% if not c.printer_configured %}<span class="pill off">not set up on CSP side</span>
+  {% elif c.printer_ok %}<span class="pill ok">ok</span>
+  {% else %}<span class="pill bad">problem</span>{% endif %}
+  <span class="note">{{ c.printer_status or '' }}</span>
+  {% if c.printer_test_ran %}
+  <p class="note">Test print ({{ c.printer_test_checked_at | ist }}):
+    {% if c.printer_test_ok %}<span class="pill ok">ok</span>
+    {% else %}<span class="pill bad">problem</span>{% endif %}
+    {{ c.printer_test_detail or '' }}
+  </p>
+  {% else %}
+  <p class="note">Test print: not available yet.</p>
+  {% endif %}
+</div>'''
+if old_panel not in c:
+    print("WARNING: csp_detail.html printer panel pattern not found, no change made")
+else:
+    c = c.replace(old_panel, new_panel)
+
+old_note = '''<p class="note">Connectivity check only (device present, not reporting an error) —
+  not a test print or test transaction.</p>'''
+new_note = '''<p class="note">Printer/micro-ATM status above is a connectivity check (device
+  present, not reporting an error). The printer also gets one real test print
+  a day to catch paper-out/jam/door-open issues the connectivity check can't
+  see; the micro-ATM has no safe way to test a real transaction, so it stays
+  connectivity-only.</p>'''
+if old_note not in c:
+    print("WARNING: csp_detail.html bottom note pattern not found, no change made")
+else:
+    c = c.replace(old_note, new_note)
+
+if c == before:
+    print("csp_detail.html: NOTHING CHANGED")
+else:
+    with open('templates/csp_detail.html', 'w') as f:
+        f.write(c)
+    print("csp_detail.html patched OK")
+PYEOF
+
+echo "== rebuilding docker image =="
+docker build -t pranjal-csp-monitor .
+docker rm -f pranjal-csp-monitor
+docker run -d --name pranjal-csp-monitor --restart unless-stopped \
+  -p 127.0.0.1:5100:5100 \
+  -v ~/pranjal/server/monitor.db:/app/monitor.db \
+  pranjal-csp-monitor
+sleep 3
+echo "== verify container running =="
+docker ps | grep pranjal-csp-monitor
+echo "== verify new columns exist =="
+docker exec pranjal-csp-monitor python3 -c "import sqlite3; c=sqlite3.connect('/app/monitor.db'); print([r[1] for r in c.execute('PRAGMA table_info(csps)')])"
+echo "== local check =="
+curl -s -o /dev/null -w "status: %{http_code}\n" http://127.0.0.1:5100/api/v1

@@ -6,10 +6,13 @@ venv/
 
 # Local runtime state - never commit real device configs, credentials, or the live DB
 agent/agent_config.json
-agent/agent.log
+agent/agent.log*
+agent/agent.lock
 server/monitor.db
 server/run.log
+server/server.log*
 demo/
+local-run/
 *.env
 .env
 

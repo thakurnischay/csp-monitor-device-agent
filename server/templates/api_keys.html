@@ -2,45 +2,69 @@
 {% block title %}API Keys - CSP Device Monitor{% endblock %}
 {% block body %}
 <h1>API Keys</h1>
-<p class="note">Issue a key for each CSP before its agent can report. Shown in full only once, right here.</p>
+<p class="note" style="margin-top:4px">Issue a key for each CSP before its agent can report. Shown in full only once, right here.</p>
 
 {% if new_key %}
-<div class="panel" style="border-color:var(--ok)">
-  <strong>{{ new_key.csp_id }}</strong> — copy this now, it will not be shown again:<br>
-  <code style="word-break:break-all">{{ new_key.api_key }}</code>
+<div class="panel" style="border-color:var(--ok);background:var(--ok-bg)10">
+  <div style="font-weight:600;margin-bottom:8px">{{ new_key.csp_id }} &mdash; copy this now, it will not be shown again</div>
+  <div style="display:flex;align-items:center;gap:4px">
+    <code class="keyval" style="word-break:break-all;background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px 10px;flex:1">{{ new_key.api_key }}</code>
+    <button type="button" class="copy-btn" data-copy="{{ new_key.api_key }}" title="Copy key">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+    </button>
+  </div>
 </div>
 {% endif %}
 
 <div class="panel">
-  <form class="inline" method="post">
+  <div style="font-weight:600;margin-bottom:12px">Issue or rotate a key</div>
+  <form class="inline" method="post" style="align-items:flex-end;gap:14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="action" value="issue">
-    <input name="csp_id" placeholder="CSP code (e.g. 1AB50895)" required>
-    <input name="name" placeholder="CSP name (e.g. Testpur CSP)">
-    <button type="submit">Issue / rotate key</button>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      <label for="csp_id_input">CSP code</label>
+      <input id="csp_id_input" name="csp_id" placeholder="e.g. 1AB50895" required>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px">
+      <label for="csp_name_input">CSP name</label>
+      <input id="csp_name_input" name="name" placeholder="e.g. Testpur CSP">
+    </div>
+    <button type="submit" class="btn btn-primary">Issue / rotate key</button>
   </form>
 </div>
 
 <table>
-  <thead><tr><th>Code</th><th>Name</th><th>Key (last 4)</th><th>Status</th><th>Created</th><th></th></tr></thead>
+  <thead><tr><th>Code</th><th>Name</th><th>Key</th><th>Status</th><th>Created</th><th></th></tr></thead>
   <tbody>
   {% for k in keys %}
     <tr>
       <td>{{ k.csp_id }}</td>
       <td>{{ k.name or '-' }}</td>
-      <td>…{{ k.api_key[-4:] }}</td>
-      <td>{% if k.active %}<span class="pill ok">active</span>{% else %}<span class="pill off">revoked</span>{% endif %}</td>
-      <td>{{ k.created_at }}</td>
       <td>
-        <form class="inline" method="post" style="display:inline">
+        <code class="keyval">&hellip;{{ k.api_key_suffix or '----' }}</code>
+        {% if k.api_key_suffix %}
+        <button type="button" class="copy-btn" data-copy="...{{ k.api_key_suffix }}" title="Copy suffix">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+        </button>
+        {% endif %}
+      </td>
+      <td>{% if k.active %}<span class="badge badge-green"><span class="dot"></span>Active</span>{% else %}<span class="badge badge-gray"><span class="dot"></span>Revoked</span>{% endif %}</td>
+      <td class="note">{{ k.created_at | ist }}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+        <form method="post" onsubmit="return confirm('{{ 'Revoke' if k.active else 'Reactivate' }} {{ k.csp_id }}?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="action" value="toggle">
           <input type="hidden" name="csp_id" value="{{ k.csp_id }}">
-          <button type="submit">{{ "Revoke" if k.active else "Reactivate" }}</button>
+          <button type="submit" class="btn btn-outline btn-sm">{{ "Revoke" if k.active else "Reactivate" }}</button>
         </form>
-        <form class="inline" method="post" style="display:inline" onsubmit="return confirm('Remove {{ k.csp_id }} entirely?')">
+        <form method="post" onsubmit="return confirm('Remove {{ k.csp_id }} entirely?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="action" value="delete">
           <input type="hidden" name="csp_id" value="{{ k.csp_id }}">
-          <button type="submit">Delete</button>
+          <button type="submit" class="btn btn-danger btn-sm">Delete</button>
         </form>
+        </div>
       </td>
     </tr>
   {% else %}

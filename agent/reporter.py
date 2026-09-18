@@ -5,6 +5,8 @@ forever in a background thread; a single failed check or a server that is
 temporarily unreachable must never stop the loop.
 """
 import logging
+import platform
+import socket
 import threading
 import time
 from datetime import date, datetime, timezone
@@ -13,10 +15,20 @@ import requests
 
 import config_store
 import device_health
+from version import AGENT_VERSION, SCHEMA_VERSION
 
 log = logging.getLogger("csp_agent.reporter")
 
 _stop_event = threading.Event()
+
+# (connect_timeout, read_timeout) - connect fails fast if the server is
+# simply unreachable, read gets more room since a report can involve a
+# real database write server-side. A single scalar timeout would apply the
+# same short window to both, which is the wrong tradeoff for either case.
+_HTTP_TIMEOUT = (5, 15)
+_MAX_ATTEMPTS = 2          # 1 real attempt + 1 bounded retry, never more
+_RETRY_DELAY_SECONDS = 2   # short - a persistent outage still waits for the
+                          # normal interval, this only smooths over a blip
 
 
 def _maybe_run_printer_functional_test(cfg: dict, printer_name: str, printer_present: bool) -> dict:
@@ -42,6 +54,22 @@ def _maybe_run_printer_functional_test(cfg: dict, printer_name: str, printer_pre
     return result
 
 
+def _safe_os_info() -> str:
+    try:
+        return platform.platform()
+    except Exception:
+        return "unknown"
+
+
+def _safe_hostname() -> str:
+    # The PC's machine name, not a person's identity - useful for support
+    # (telling apart multiple PCs at one CSP), not sensitive personal data.
+    try:
+        return socket.gethostname()
+    except Exception:
+        return ""
+
+
 def build_payload(cfg: dict) -> dict:
     health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
                                  cfg.get("software_process", ""))
@@ -54,6 +82,10 @@ def build_payload(cfg: dict) -> dict:
     functional = _maybe_run_printer_functional_test(
         cfg, resolved_printer_name, health["printer"].get("present", False))
     return {
+        "schema_version": SCHEMA_VERSION,
+        "agent_version": AGENT_VERSION,
+        "os": _safe_os_info(),
+        "hostname": _safe_hostname(),
         "csp_id": cfg["csp_id"],
         "reported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "printer": health["printer"],
@@ -64,24 +96,35 @@ def build_payload(cfg: dict) -> dict:
 
 def report_once() -> dict:
     """One check-and-send cycle. Never raises — returns {"ok": bool, ...} so
-    the caller (loop or a manual "Report now" button) can show what happened."""
+    the caller (loop or a manual "Report now" button) can show what happened.
+
+    A failed POST gets one bounded retry after a short delay, to smooth over
+    a transient network blip without turning into a busy loop - a
+    persistently unreachable server still just waits for the next normal
+    interval, same as before. Never retries on a 401 (a bad key won't fix
+    itself by trying again)."""
     cfg = config_store.load()
     if not config_store.is_registered(cfg):
         return {"ok": False, "error": "agent not registered yet — set server URL, "
                                        "CSP ID and API key in the local status page"}
     payload = build_payload(cfg)
-    try:
-        r = requests.post(
-            cfg["server_url"].rstrip("/") + "/api/report",
-            headers={"X-API-Key": cfg["api_key"], "Content-Type": "application/json"},
-            json=payload, timeout=10)
-        if r.status_code == 401:
-            return {"ok": False, "error": "server rejected the API key (401) — "
-                                           "check CSP ID / API key in the status page"}
-        r.raise_for_status()
-        return {"ok": True, "payload": payload}
-    except requests.RequestException as e:
-        return {"ok": False, "error": f"could not reach server: {e}"}
+    url = cfg["server_url"].rstrip("/") + "/api/report"
+    headers = {"X-API-Key": cfg["api_key"], "Content-Type": "application/json"}
+
+    last_error = "unknown error"
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=_HTTP_TIMEOUT)
+            if r.status_code == 401:
+                return {"ok": False, "error": "server rejected the API key (401) — "
+                                               "check CSP ID / API key in the status page"}
+            r.raise_for_status()
+            return {"ok": True, "payload": payload}
+        except requests.RequestException as e:
+            last_error = str(e)
+            if attempt < _MAX_ATTEMPTS:
+                time.sleep(_RETRY_DELAY_SECONDS)
+    return {"ok": False, "error": f"could not reach server: {last_error}"}
 
 
 def _loop():

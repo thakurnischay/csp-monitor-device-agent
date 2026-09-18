@@ -1,0 +1,75 @@
+cd ~/pranjal/server
+python3 - << 'PYEOF'
+with open('app.py') as f:
+    content = f.read()
+
+if 'template_filter("ist")' not in content:
+    content = content.replace(
+        'from routes import ui_bp\n',
+        'from routes import ui_bp\nfrom datetime import datetime, timezone, timedelta\n'
+    )
+    old = '    app.register_blueprint(api_bp)\n    return app'
+    new = '''    app.register_blueprint(api_bp)
+
+    IST = timezone(timedelta(hours=5, minutes=30))
+
+    @app.template_filter("ist")
+    def _ist_filter(value):
+        if not value:
+            return "-"
+        try:
+            dt = datetime.fromisoformat(str(value))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.astimezone(IST)
+            return dt.strftime("%d %b %Y, %I:%M:%S %p") + " IST"
+        except (ValueError, TypeError):
+            return str(value)
+
+    return app'''
+    if old not in content:
+        print("WARNING: app.py pattern not found, no change made")
+    else:
+        content = content.replace(old, new)
+        with open('app.py', 'w') as f:
+            f.write(content)
+        print("app.py patched OK")
+else:
+    print("app.py already has ist filter, skipping")
+
+with open('templates/fleet.html') as f:
+    c = f.read()
+before = c
+c = c.replace('Last seen (UTC)', 'Last seen (IST)')
+c = c.replace("{{ c.last_seen or '-' }}", "{{ c.last_seen | ist }}")
+if c == before:
+    print("WARNING: fleet.html - no change made, pattern not found")
+else:
+    with open('templates/fleet.html', 'w') as f:
+        f.write(c)
+    print("fleet.html patched OK")
+
+with open('templates/csp_detail.html') as f:
+    c = f.read()
+before = c
+c = c.replace("last seen {{ c.last_seen or '-' }}", "last seen {{ c.last_seen | ist }}")
+if c == before:
+    print("WARNING: csp_detail.html - no change made, pattern not found")
+else:
+    with open('templates/csp_detail.html', 'w') as f:
+        f.write(c)
+    print("csp_detail.html patched OK")
+PYEOF
+
+echo "== rebuilding docker image =="
+docker build -t pranjal-csp-monitor .
+docker rm -f pranjal-csp-monitor
+docker run -d --name pranjal-csp-monitor --restart unless-stopped \
+  -p 127.0.0.1:5100:5100 \
+  -v ~/pranjal/server/monitor.db:/app/monitor.db \
+  pranjal-csp-monitor
+sleep 3
+echo "== verify container running =="
+docker ps | grep pranjal-csp-monitor
+echo "== local check =="
+curl -s -o /dev/null -w "status: %{http_code}\n" http://127.0.0.1:5100/api/v1

@@ -1,0 +1,15 @@
+Write-Host "== running agent processes =="
+Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*agent.py*" } |
+    Select-Object ProcessId, CommandLine | Format-List
+
+Write-Host "== all agent_config.json files found on this PC =="
+Get-ChildItem -Path C:\ -Filter "agent_config.json" -Recurse -ErrorAction SilentlyContinue -Force |
+    ForEach-Object {
+        Write-Host "---- $($_.FullName) ----"
+        Get-Content $_.FullName
+        Write-Host ""
+    }
+
+Write-Host "== Startup folder entry =="
+Get-Content "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\CSPDeviceMonitorAgent.bat" -ErrorAction SilentlyContinue

@@ -4,19 +4,26 @@
 <p class="note"><a href="{{ url_for('ui.fleet') }}" style="color:var(--accent)">&larr; Fleet</a></p>
 <h1>{{ c.name or c.csp_id }}</h1>
 <p class="note">Code {{ c.csp_id }} &middot;
-  {% if c.online %}<span class="pill ok">online</span>{% else %}<span class="pill off">offline</span>{% endif %}
-  &middot; last seen {{ c.last_seen | ist }}</p>
+  {% if c.online %}<span class="badge badge-green"><span class="dot"></span>online</span>{% else %}<span class="badge badge-gray"><span class="dot"></span>offline</span>{% endif %}
+  &middot; last seen {{ c.last_seen | relative_time }} ({{ c.last_seen | ist }})</p>
+{% if c.agent_version or c.hostname or c.os_info %}
+<p class="note">
+  {% if c.agent_version %}Agent v{{ c.agent_version }}{% endif %}
+  {% if c.hostname %}&middot; {{ c.hostname }}{% endif %}
+  {% if c.os_info %}&middot; {{ c.os_info }}{% endif %}
+</p>
+{% endif %}
 
 <div class="panel">
   <h2 style="font-size:1.05rem">Passbook printer</h2>
-  {% if not c.printer_configured %}<span class="pill off">not set up on CSP side</span>
-  {% elif c.printer_ok %}<span class="pill ok">ok</span>
-  {% else %}<span class="pill bad">problem</span>{% endif %}
+  {% if not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
+  {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>{% endif %}
   <span class="note">{{ c.printer_status or '' }}</span>
   {% if c.printer_test_ran %}
   <p class="note">Test print ({{ c.printer_test_checked_at | ist }}):
-    {% if c.printer_test_ok %}<span class="pill ok">ok</span>
-    {% else %}<span class="pill bad">problem</span>{% endif %}
+    {% if c.printer_test_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
+    {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>{% endif %}
     {{ c.printer_test_detail or '' }}
   </p>
   {% else %}
@@ -26,9 +33,9 @@
 
 <div class="panel">
   <h2 style="font-size:1.05rem">Micro-ATM</h2>
-  {% if not c.microatm_configured %}<span class="pill off">not set up on CSP side</span>
-  {% elif c.microatm_ok %}<span class="pill ok">ok</span>
-  {% else %}<span class="pill bad">problem</span>{% endif %}
+  {% if not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
+  {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>{% endif %}
   <span class="note">{{ c.microatm_status or '' }}</span>
 </div>
 
@@ -37,4 +44,48 @@
   a day to catch paper-out/jam/door-open issues the connectivity check can't
   see; the micro-ATM has no safe way to test a real transaction, so it stays
   connectivity-only.</p>
+
+{% if open_incidents %}
+<div class="panel" style="border-color:var(--bad)">
+  <h2 style="font-size:1.05rem;color:var(--bad)">Open problems</h2>
+  <table>
+    <thead><tr><th>Device</th><th>Problem</th><th>Started</th></tr></thead>
+    <tbody>
+    {% for i in open_incidents %}
+      <tr><td>{{ i.device }}</td><td>{{ i.problem }}</td><td>{{ i.started_at | ist }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Recent history</h2>
+  {% if events %}
+  <table>
+    <thead><tr><th>When</th><th>Event</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr><td>{{ e.occurred_at | ist }}</td><td>{{ e.event_type }}</td><td class="note">{{ e.detail }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="note">No state changes recorded yet - this shows meaningful transitions (connected/disconnected, test print results), not every heartbeat.</p>
+  {% endif %}
+</div>
+
+{% if past_incidents %}
+<div class="panel">
+  <h2 style="font-size:1.05rem">Past problems</h2>
+  <table>
+    <thead><tr><th>Device</th><th>Problem</th><th>Started</th><th>Resolved</th></tr></thead>
+    <tbody>
+    {% for i in past_incidents %}
+      <tr><td>{{ i.device }}</td><td>{{ i.problem }}</td><td>{{ i.started_at | ist }}</td><td>{{ i.resolved_at | ist }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% endblock %}

@@ -1,40 +1,153 @@
 {% extends "base.html" %}
 {% block title %}Fleet - CSP Device Monitor{% endblock %}
 {% block body %}
-<h1>CSP Fleet</h1>
-<p class="note">Live device status of every registered CSP. Online = reported within the last {{ window }} minutes.</p>
+{% if refresh != '0' %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1>Fleet</h1>
+    <p class="note" style="margin:4px 0 0">Updated {{ updated_at | relative_time }} &middot; {{ updated_at | ist }}</p>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span class="note">Auto-refresh</span>
+    {% if refresh != '0' %}<span class="live-dot"></span>{% endif %}
+    <div class="segmented">
+      <a href="{{ qs(refresh=None) }}" class="{{ 'active' if refresh == '0' }}">Off</a>
+      <a href="{{ qs(refresh='30') }}" class="{{ 'active' if refresh == '30' }}">30s</a>
+      <a href="{{ qs(refresh='60') }}" class="{{ 'active' if refresh == '60' }}">60s</a>
+    </div>
+  </div>
+</div>
+<p class="note" style="margin-top:10px">Online = reported within the last {{ window }} minutes; Stale = reported within the last hour but not recently; Offline = longer than that, or never.</p>
 
-<div class="cards">
-  <div class="card"><div class="v">{{ total }}</div><div class="l">Total CSPs</div></div>
-  <div class="card"><div class="v" style="color:var(--ok)">{{ online }}</div><div class="l">Online</div></div>
-  <div class="card"><div class="v" style="color:var(--bad)">{{ printer_problems }}</div><div class="l">Printer problems</div></div>
-  <div class="card"><div class="v" style="color:var(--bad)">{{ microatm_problems }}</div><div class="l">Micro-ATM problems</div></div>
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-top">
+      <div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21v-6h6v6"/></svg></div>
+    </div>
+    <div class="kpi-value">{{ total }}</div>
+    <div class="kpi-label">Total CSPs</div>
+  </div>
+  <div class="kpi-card tint-ok">
+    <div class="kpi-top">
+      <div class="kpi-icon ok"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/></svg></div>
+      <span class="kpi-dot ok"></span>
+    </div>
+    <div class="kpi-value">{{ online }}</div>
+    <div class="kpi-label">Online</div>
+  </div>
+  <div class="kpi-card tint-amber">
+    <div class="kpi-top">
+      <div class="kpi-icon amber"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+      <span class="kpi-dot amber"></span>
+    </div>
+    <div class="kpi-value">{{ stale }}</div>
+    <div class="kpi-label">Stale</div>
+  </div>
+  <div class="kpi-card tint-bad">
+    <div class="kpi-top">
+      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20"/><path d="M8.5 8.5A7 7 0 0 0 5 14.5"/><path d="M12 19h.01"/><path d="M15.5 15.5a7 7 0 0 0 .5-8"/></svg></div>
+      <span class="kpi-dot bad"></span>
+    </div>
+    <div class="kpi-value">{{ offline }}</div>
+    <div class="kpi-label">Offline</div>
+  </div>
+  <div class="kpi-card tint-bad">
+    <div class="kpi-top">
+      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="9" width="16" height="7" rx="1"/><path d="M6 9V5h12v4M8 16v3h8v-3"/></svg></div>
+      <span class="kpi-dot bad"></span>
+    </div>
+    <div class="kpi-value">{{ printer_problems }}</div>
+    <div class="kpi-label">Printer problems</div>
+  </div>
+  <div class="kpi-card tint-bad">
+    <div class="kpi-top">
+      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/><path d="M7 15h4"/></svg></div>
+      <span class="kpi-dot bad"></span>
+    </div>
+    <div class="kpi-value">{{ microatm_problems }}</div>
+    <div class="kpi-label">Micro-ATM problems</div>
+  </div>
 </div>
 
+<form method="get" class="toolbar">
+  <div class="search-wrap">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <input name="q" value="{{ q }}" placeholder="Search by name or code&hellip;">
+  </div>
+  <select name="status">
+    <option value="" {{ 'selected' if not status_filter }}>All statuses</option>
+    <option value="ONLINE" {{ 'selected' if status_filter == 'ONLINE' }}>Online</option>
+    <option value="STALE" {{ 'selected' if status_filter == 'STALE' }}>Stale</option>
+    <option value="OFFLINE" {{ 'selected' if status_filter == 'OFFLINE' }}>Offline</option>
+    <option value="NEVER_REPORTED" {{ 'selected' if status_filter == 'NEVER_REPORTED' }}>Never reported</option>
+  </select>
+  <div class="segmented">
+    <a href="{{ qs(status='ONLINE', page=1) }}" class="{{ 'active' if status_filter == 'ONLINE' }}">Online</a>
+    <a href="{{ qs(status='STALE', page=1) }}" class="{{ 'active' if status_filter == 'STALE' }}">Stale</a>
+    <a href="{{ qs(status='OFFLINE', page=1) }}" class="{{ 'active' if status_filter == 'OFFLINE' }}">Offline</a>
+  </div>
+  <label class="toggle-label">
+    <span class="switch">
+      <input type="checkbox" name="problems_only" value="1" {{ 'checked' if problems_only }} class="auto-submit">
+      <span class="track"></span>
+    </span>
+    Problems only
+  </label>
+  <button type="submit" class="btn btn-outline">Filter</button>
+  {% if q or status_filter or problems_only %}<a href="{{ url_for('ui.fleet') }}" class="note">Clear</a>{% endif %}
+  <a href="{{ csv_url }}" class="btn btn-outline" style="margin-left:auto">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+    Export CSV{% if matched != total %} ({{ matched }}){% endif %}
+  </a>
+</form>
+
 <table>
-  <thead><tr><th>Status</th><th>CSP</th><th>Code</th><th>Printer</th><th>Micro-ATM</th><th>Last seen (IST)</th></tr></thead>
+  <thead><tr>
+    <th>CSP ID</th>
+    <th><a href="{{ sort_urls.name }}">Name{% if sort == 'name' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
+    <th><a href="{{ sort_urls.status }}">Status{% if sort == 'status' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
+    <th><a href="{{ sort_urls.last_seen }}">Last report{% if sort == 'last_seen' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
+    <th>Printer status</th><th>Micro-ATM status</th>
+  </tr></thead>
   <tbody>
   {% for c in csps %}
     <tr>
-      <td>{% if c.online %}<span class="pill ok">online</span>{% else %}<span class="pill off">offline</span>{% endif %}</td>
-      <td><a class="row" href="{{ url_for('ui.csp_detail', csp_id=c.csp_id) }}">{{ c.name or '-' }}</a></td>
       <td>{{ c.csp_id }}</td>
+      <td><a class="row" href="{{ url_for('ui.csp_detail', csp_id=c.csp_id) }}">{{ c.name or '-' }}</a></td>
       <td>
-        {% if not c.printer_configured %}<span class="pill off">not set up</span>
-        {% elif c.printer_ok %}<span class="pill ok">ok</span>
-        {% else %}<span class="pill bad">problem</span>{% endif %}
-        {% if c.printer_test_ran %}<div class="note" style="font-size:0.78rem;margin-top:2px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
+        {% if c.state == 'ONLINE' %}<span class="badge badge-green"><span class="dot"></span>Online</span>
+        {% elif c.state == 'STALE' %}<span class="badge badge-amber"><span class="dot"></span>Stale</span>
+        {% elif c.state == 'NEVER_REPORTED' %}<span class="badge badge-gray"><span class="dot"></span>Never reported</span>
+        {% else %}<span class="badge badge-red"><span class="dot"></span>Offline</span>{% endif %}
+      </td>
+      <td title="{{ c.last_seen | ist }}" class="note">{{ c.last_seen | relative_time }}</td>
+      <td>
+        {% if not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
+        {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
+        {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
+        {% if c.printer_test_ran %}<div class="note" style="font-size:0.76rem;margin-top:3px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
       </td>
       <td>
-        {% if not c.microatm_configured %}<span class="pill off">not set up</span>
-        {% elif c.microatm_ok %}<span class="pill ok">ok</span>
-        {% else %}<span class="pill bad">problem</span>{% endif %}
+        {% if not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
+        {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
+        {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
       </td>
-      <td>{{ c.last_seen | ist }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="note">No CSP has reported yet.</td></tr>
+    <tr><td colspan="6" class="note">
+      {% if problems_only %}No open problems right now.
+      {% elif q or status_filter %}No CSP matches this filter.
+      {% else %}No CSP has reported yet.{% endif %}
+    </td></tr>
   {% endfor %}
   </tbody>
 </table>
+
+{% if total_pages > 1 %}
+<div class="note" style="margin-top:12px;display:flex;gap:14px;align-items:center">
+  <span>Page {{ page }} of {{ total_pages }} ({{ matched }} matching)</span>
+  {% if page > 1 %}<a href="{{ qs(page=page-1) }}">&larr; Previous</a>{% endif %}
+  {% if page < total_pages %}<a href="{{ qs(page=page+1) }}">Next &rarr;</a>{% endif %}
+</div>
+{% endif %}
 {% endblock %}

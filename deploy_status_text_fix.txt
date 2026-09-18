@@ -1,0 +1,60 @@
+cd ~/pranjal/server
+python3 - << 'PYEOF'
+with open('templates/fleet.html') as f:
+    c = f.read()
+before = c
+
+old_printer = """      <td>
+        {% if not c.printer_configured %}<span class="pill off">not set up</span>
+        {% elif c.printer_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+      </td>"""
+new_printer = """      <td>
+        {% if not c.printer_configured %}<span class="pill off">not set up</span>
+        {% elif c.printer_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+        {% if c.printer_configured %}<div class="note" style="font-size:0.78rem;margin-top:2px">{{ c.printer_status or '' }}</div>{% endif %}
+      </td>"""
+
+old_microatm = """      <td>
+        {% if not c.microatm_configured %}<span class="pill off">not set up</span>
+        {% elif c.microatm_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+      </td>"""
+new_microatm = """      <td>
+        {% if not c.microatm_configured %}<span class="pill off">not set up</span>
+        {% elif c.microatm_ok %}<span class="pill ok">ok</span>
+        {% else %}<span class="pill bad">problem</span>{% endif %}
+        {% if c.microatm_configured %}<div class="note" style="font-size:0.78rem;margin-top:2px">{{ c.microatm_status or '' }}</div>{% endif %}
+      </td>"""
+
+if old_printer not in c:
+    print("WARNING: printer cell pattern not found, no change made")
+else:
+    c = c.replace(old_printer, new_printer)
+
+if old_microatm not in c:
+    print("WARNING: microatm cell pattern not found, no change made")
+else:
+    c = c.replace(old_microatm, new_microatm)
+
+if c == before:
+    print("NOTHING CHANGED - check warnings above")
+else:
+    with open('templates/fleet.html', 'w') as f:
+        f.write(c)
+    print("fleet.html patched OK")
+PYEOF
+
+echo "== rebuilding docker image =="
+docker build -t pranjal-csp-monitor .
+docker rm -f pranjal-csp-monitor
+docker run -d --name pranjal-csp-monitor --restart unless-stopped \
+  -p 127.0.0.1:5100:5100 \
+  -v ~/pranjal/server/monitor.db:/app/monitor.db \
+  pranjal-csp-monitor
+sleep 3
+echo "== verify container running =="
+docker ps | grep pranjal-csp-monitor
+echo "== local check =="
+curl -s -o /dev/null -w "status: %{http_code}\n" http://127.0.0.1:5100/api/v1

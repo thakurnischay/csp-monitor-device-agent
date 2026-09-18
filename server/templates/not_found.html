@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Not found - CSP Device Monitor{% endblock %}
+{% block body %}
+<p class="note"><a href="{{ url_for('ui.fleet') }}" style="color:var(--accent)">&larr; Fleet</a></p>
+<div class="panel">
+  <h1 style="font-size:1.1rem;margin-top:0">CSP not found</h1>
+  <p class="note">No CSP with code "{{ csp_id }}" is registered. It may have been removed, or the code was mistyped.</p>
+</div>
+{% endblock %}
