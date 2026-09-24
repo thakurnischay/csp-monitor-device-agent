@@ -49,6 +49,46 @@ class AutoCorrectionTests(unittest.TestCase):
         usb = [{"name": "Ingenico iCT220 Micro ATM", "ok": True, "status": "OK"}]
         self.assertEqual(dh.resolve_microatm("Wrong Manual Entry", usb), "Ingenico iCT220 Micro ATM")
 
+    def test_biometric_scanner_is_never_auto_picked_as_the_microatm(self):
+        # Real field bug: a Mantra fingerprint scanner (Aadhaar auth, not a
+        # micro-ATM) got silently saved as "the micro-ATM" because its brand
+        # used to be in the known-microATM keyword list. A pure biometric
+        # device must never be recognized as a micro-ATM candidate, even when
+        # it's the only USB device present and the manual pick is blank/wrong.
+        usb = [{"name": "Mantra MFS100 Biometric Device", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_microatm(usb), "")
+        self.assertEqual(dh.resolve_microatm("", usb), "")
+        self.assertEqual(dh.resolve_microatm("Some Manual Entry", usb), "Some Manual Entry")
+
+    def test_real_microatm_still_recognized_alongside_a_biometric_scanner(self):
+        # Both devices present at once (the common real setup) - the genuine
+        # micro-ATM must still be the one that gets recognized.
+        usb = [
+            {"name": "Mantra MFS100 Biometric Device", "ok": True, "status": "OK"},
+            {"name": "Ezetap Micro ATM", "ok": True, "status": "OK"},
+        ]
+        self.assertEqual(dh.auto_detect_microatm(usb), "Ezetap Micro ATM")
+
+    def test_virtual_enumerator_placeholder_is_never_auto_picked_as_the_microatm(self):
+        # Real field bug: "IngenicoEnum" - a software-installed virtual bus/
+        # enumerator placeholder that Ingenico's own driver keeps present in
+        # Windows even with NOTHING physically plugged in - got auto-picked
+        # as "the micro-ATM" and showed OK despite no real device being
+        # connected. The "Enum" naming pattern is a placeholder, never a real
+        # product, and must never be treated as a genuine candidate.
+        usb = [{"name": "IngenicoEnum", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_microatm(usb), "")
+        self.assertEqual(dh.resolve_microatm("", usb), "")
+
+    def test_manual_pick_of_a_virtual_enumerator_is_corrected_away(self):
+        # Same protection as the virtual-printer case: if a placeholder ever
+        # ends up manually saved, a real device found alongside it must win.
+        usb = [
+            {"name": "IngenicoEnum", "ok": True, "status": "OK"},
+            {"name": "Ingenico Move 5000", "ok": True, "status": "OK"},
+        ]
+        self.assertEqual(dh.resolve_microatm("IngenicoEnum", usb), "Ingenico Move 5000")
+
 
 class ComPortMergeTests(unittest.TestCase):
     """A printer that never registers as a real Windows printer, only as a
@@ -75,6 +115,58 @@ class ComPortMergeTests(unittest.TestCase):
             result = dh.check("", "", "")
         self.assertEqual(result["printer"]["resolved_name"], "TVS RP3200 (COM4)")
         self.assertTrue(result["printer"]["present"])
+
+
+class NamePrefixFallbackTests(unittest.TestCase):
+    """Real field case: a CSP typed the printer's physical model label
+    ("EPSON PLQ-50 CSK") because it wasn't in the dropdown as typed, but
+    Windows had it registered under a different driver name
+    ("EPSON PLQ-50 ESC/P2") - a working printer was reported as "not found"
+    purely from a naming mismatch, not an actual problem."""
+
+    def test_saved_name_with_different_trailing_word_still_matches(self):
+        printers = [{"name": "EPSON PLQ-50 ESC/P2", "ok": True, "status": "idle (ready)"}]
+        result = dh.printer_status("EPSON PLQ-50 CSK", printers)
+        self.assertTrue(result["present"])
+        self.assertTrue(result["ok"])
+
+    def test_com_port_renumbering_still_matches_the_same_printer(self):
+        # The exact scenario the prefix match also covers: a COM-port
+        # printer's port number shifting after a replug/driver reset.
+        printers = [{"name": "TVS RP3200 (COM6)", "ok": True, "status": "idle (ready)"}]
+        result = dh.printer_status("TVS RP3200 (COM4)", printers)
+        self.assertTrue(result["present"])
+
+    def test_unrelated_device_on_the_same_port_is_never_mistaken_for_the_printer(self):
+        # Safety check: the fallback matches on the device's own name text,
+        # never on the port number alone - a completely different device
+        # that happens to land on the same COM port must still report
+        # "not found", not be silently treated as the passbook printer.
+        printers = [{"name": "USB-SERIAL CH340 (COM4)", "ok": True, "status": "OK"}]
+        result = dh.printer_status("TVS RP3200 (COM4)", printers)
+        self.assertFalse(result["present"])
+
+    def test_ambiguous_prefix_match_is_never_guessed(self):
+        # Two present devices share the fallback prefix - must still refuse,
+        # same "never guess" rule as the exact-match ambiguous case.
+        printers = [
+            {"name": "EPSON PLQ-50 ESC/P2", "ok": True, "status": "idle (ready)"},
+            {"name": "EPSON PLQ-50 USB", "ok": True, "status": "idle (ready)"},
+        ]
+        result = dh.printer_status("EPSON PLQ-50 CSK", printers)
+        self.assertFalse(result["present"])
+
+    def test_single_generic_word_prefix_is_too_permissive_to_match(self):
+        # A one-word remainder (e.g. just the brand name) is excluded from
+        # the fallback entirely - too loose to safely match on.
+        printers = [{"name": "EPSON L3210", "ok": True, "status": "idle (ready)"}]
+        result = dh.printer_status("EPSON XYZ", printers)
+        self.assertFalse(result["present"])
+
+    def test_microatm_gets_the_same_fallback(self):
+        usb = [{"name": "Ingenico Move iCT220", "ok": True, "status": "OK"}]
+        result = dh.microatm_status("Ingenico Move 5000", usb)
+        self.assertTrue(result["present"])
 
 
 class TimeoutProtectionTests(unittest.TestCase):
@@ -142,6 +234,20 @@ class FunctionalTestTests(unittest.TestCase):
         with mock.patch("subprocess.run", side_effect=Exception("boom")):
             result = dh.printer_functional_test("TVS RP3200")
         self.assertFalse(result["ran"])
+
+    def test_unknown_status_is_not_treated_as_a_problem(self):
+        # Real field case: a printer that worked fine (confirmed by the CSP
+        # and by the separate connectivity check) still showed "Test print:
+        # problem - UNKNOWN". Win32_PrintJob's generic Status property
+        # defaults to "Unknown" for plenty of successfully-printed jobs, not
+        # just failed ones - it must not be treated as a specific error like
+        # "Paper Out" or "Door Open".
+        with mock.patch("subprocess.run"), \
+             mock.patch.object(dh, "_run_ps", return_value=[{"Name": "TVS RP3200,5", "Status": "Unknown"}]), \
+             mock.patch("time.sleep"):
+            result = dh.printer_functional_test("TVS RP3200")
+        self.assertTrue(result["ran"])
+        self.assertTrue(result["ok"])
 
 
 if __name__ == "__main__":

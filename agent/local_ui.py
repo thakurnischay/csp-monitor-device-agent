@@ -218,13 +218,28 @@ function saveServer() {
   }, 10000);
 }
 function reportNow() {
-  document.getElementById("msg").textContent = "Reporting...";
-  xhrJson("POST", "/report_now", null, function (d) {
-    if (!d) { document.getElementById("msg").textContent = "Report failed - no response from the agent."; return; }
-    document.getElementById("msg").textContent = d.ok ? "Reported successfully." : ("Failed: " + d.error);
+  // Save whatever is currently typed in the connection fields FIRST - a
+  // real, repeated confusion: typing a new API key and clicking "Report now"
+  // without also clicking "Save connection" reports using the OLD saved key
+  // and fails, making a perfectly good new key look broken. A blank api_key
+  // field (e.g. right after a previous save cleared it) is a no-op on the
+  // server side, so this never wipes an already-saved key.
+  document.getElementById("msg").textContent = "Saving and reporting...";
+  xhrJson("POST", "/configure", {
+    server_url: document.getElementById("serverUrl").value,
+    csp_id: document.getElementById("cspId").value,
+    api_key: document.getElementById("apiKey").value
   }, function () {
-    document.getElementById("msg").textContent = "Report failed - request timed out or the agent is not responding.";
-  }, 40000);
+    document.getElementById("apiKey").value = "";
+    xhrJson("POST", "/report_now", null, function (d) {
+      if (!d) { document.getElementById("msg").textContent = "Report failed - no response from the agent."; return; }
+      document.getElementById("msg").textContent = d.ok ? "Reported successfully." : ("Failed: " + d.error);
+    }, function () {
+      document.getElementById("msg").textContent = "Report failed - request timed out or the agent is not responding.";
+    }, 40000);
+  }, function () {
+    document.getElementById("msg").textContent = "Could not save - is the agent still running?";
+  }, 10000);
 }
 window.onerror = function (msg) {
   var m = document.getElementById("msg");
@@ -253,18 +268,26 @@ def status():
     cfg = config_store.load()
     safe_cfg = {k: v for k, v in cfg.items() if k != "api_key"}
     current_printer = cfg.get("printer_name", "")
+    current_microatm = cfg.get("microatm_name", "")
     # Reuse the SAME scan check() already did (health["printer_list"]/
     # ["usb_device_list"]) instead of scanning again - three separate scans
     # per page load used to make this page look stuck on a slow/real CSP PC.
     printers = [p["name"] for p in health["printer_list"]
                if p["name"] == current_printer or not device_health.is_likely_virtual_printer(p["name"])]
+    # Same idea for micro-ATM: a software-installed virtual bus/enumerator
+    # placeholder (e.g. "IngenicoEnum") should never be suggested as if it
+    # were the real device - it stays present in Windows even with nothing
+    # actually plugged in, and is a real field case that got auto-picked
+    # incorrectly before this filter existed.
+    usb_devices = [d["name"] for d in health["usb_device_list"]
+                  if d["name"] == current_microatm or not device_health.is_likely_virtual_usb_device(d["name"])]
     return jsonify({
         "printer": health["printer"],
         "microatm": health["microatm"],
         "software": health["software"],
         "config": safe_cfg,
         "available_printers": printers,
-        "available_usb_devices": [d["name"] for d in health["usb_device_list"]],
+        "available_usb_devices": usb_devices,
         "printer_functional_test": {
             "date": cfg.get("last_printer_test_date", ""),
             "result": cfg.get("last_printer_test_result", {}),
@@ -277,6 +300,12 @@ def configure():
     data = request.get_json(silent=True) or {}
     allowed = {"printer_name", "microatm_name", "software_process", "server_url",
               "csp_id", "api_key", "interval_seconds"}
+    # Strip whitespace on every string field - a stray leading/trailing space
+    # from a copy-paste (easy to pick up when copying the API key, which is
+    # shown once and never re-shown) makes the saved value byte-for-byte
+    # different from what the server actually stored, so every report is
+    # silently rejected as "invalid API key" with no visible sign why.
+    data = {k: (v.strip() if isinstance(v, str) else v) for k, v in data.items()}
     updates = {k: v for k, v in data.items() if k in allowed and v not in (None, "")}
     # An explicitly blank device/software selection should still clear it.
     for k in ("printer_name", "microatm_name", "software_process"):

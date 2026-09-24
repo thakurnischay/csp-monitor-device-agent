@@ -109,7 +109,11 @@ def report_once() -> dict:
                                        "CSP ID and API key in the local status page"}
     payload = build_payload(cfg)
     url = cfg["server_url"].rstrip("/") + "/api/report"
-    headers = {"X-API-Key": cfg["api_key"], "Content-Type": "application/json"}
+    # .strip() defends against a stray whitespace character already saved in
+    # an older config (before local_ui.py started stripping on save) - a
+    # config on disk from before that fix would otherwise keep failing
+    # forever with no way to tell why.
+    headers = {"X-API-Key": (cfg["api_key"] or "").strip(), "Content-Type": "application/json"}
 
     last_error = "unknown error"
     for attempt in range(1, _MAX_ATTEMPTS + 1):

@@ -77,7 +77,12 @@ def readiness():
 
 @api_bp.route("/api/report", methods=["POST"])
 def report():
-    key = request.headers.get("X-API-Key", "")
+    # .strip() protects against an agent that saved its key with stray
+    # whitespace (e.g. a copy-paste mishap on the one-time key reveal) -
+    # every such report would otherwise fail as "invalid API key" forever
+    # with no visible reason why, even on agent versions already deployed
+    # before this was fixed on the agent side too.
+    key = request.headers.get("X-API-Key", "").strip()
     body = request.get_json(silent=True) or {}
     csp_id = str(body.get("csp_id") or "").strip()
 

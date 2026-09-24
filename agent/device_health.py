@@ -91,10 +91,15 @@ _KNOWN_PRINTER_BRANDS = (
     "passbook", "troy", "godex", "genicom", "olivetti bp", "posiflex",
     "citizen ct-s", "custom vkp", "star tsp", "hasman", "svp",
 )
+# Deliberately excludes pure fingerprint/biometric-scanner brands (Mantra,
+# Morpho, SecuGen, Startek, Precision Biometric, Bioenable) - those are
+# Aadhaar-auth devices, not micro-ATMs. A real field CSP had its Mantra
+# MFS100 biometric scanner silently auto-picked as "the micro-ATM" because
+# it used to be in this list, which meant the actual micro-ATM (or its
+# absence) was never checked at all.
 _KNOWN_MICROATM_BRANDS = (
     "ingenico", "ezetap", "mswipe", "morefun", "bijlipay", "spice digital",
-    "pax tech", "verifone", "innoviti", "mantra", "morpho", "startek",
-    "secugen", "precision biometric", "bioenable", "eko minipos",
+    "pax tech", "verifone", "innoviti", "eko minipos",
     "electracard", "cygnet", "m2i", "wcbs", "genesys", "smart chip",
 )
 
@@ -127,13 +132,42 @@ def is_likely_virtual_printer(name: str) -> bool:
     return any(hint in n for hint in _VIRTUAL_PRINTER_HINTS)
 
 
+# Real field case: "IngenicoEnum" got auto-picked as "the micro-ATM" even
+# though nothing was physically plugged in. Ingenico's own driver/SDK
+# installs a persistent virtual bus/enumerator placeholder device that stays
+# present in Windows regardless of whether real hardware is attached
+# downstream - the "Enum" suffix is the standard Windows convention for this
+# kind of software-only placeholder, never a real marketed product name, so
+# it must never be picked as if it were the actual device.
+_VIRTUAL_USB_HINTS = ("enum",)
+
+
+def is_likely_virtual_usb_device(name: str) -> bool:
+    n = (name or "").lower()
+    return any(hint in n for hint in _VIRTUAL_USB_HINTS)
+
+
 def _best_brand_match(items: list, brand_keywords: tuple):
     """The single item whose name matches a known brand keyword, or None if
-    zero or more than one match — an ambiguous or unrecognized result must
-    never be silently guessed at, only an unambiguous one."""
+    still ambiguous after the tiebreaker below — an ambiguous or unrecognized
+    result must never be silently guessed at, only an unambiguous one.
+
+    Real field case: a CSP had TWO Epson PLQ printer entries in Windows (the
+    real, currently-connected one, plus a stale leftover definition from a
+    previous printer) - both matched the same brand keyword, so this used to
+    give up entirely and leave the printer unconfigured despite the real one
+    being right there. If exactly one candidate is actually present/OK and
+    the rest are not, that live one is the answer - a real "is it plugged in
+    and working" signal, not a guess between two equally-plausible names."""
     matches = [item for item in items
               if any(kw in item["name"].lower() for kw in brand_keywords)]
-    return matches[0]["name"] if len(matches) == 1 else None
+    if len(matches) == 1:
+        return matches[0]["name"]
+    if len(matches) > 1:
+        live = [item for item in matches if item.get("ok")]
+        if len(live) == 1:
+            return live[0]["name"]
+    return None
 
 
 def auto_detect_printer(printers: list = None) -> str:
@@ -157,7 +191,8 @@ def auto_detect_microatm(usb_devices: list = None) -> str:
     raises."""
     try:
         usb_devices = list_usb_devices() if usb_devices is None else usb_devices
-        return _best_brand_match(usb_devices, _KNOWN_MICROATM_BRANDS) or ""
+        real = [d for d in usb_devices if not is_likely_virtual_usb_device(d["name"])]
+        return _best_brand_match(real, _KNOWN_MICROATM_BRANDS) or ""
     except Exception:
         return ""
 
@@ -186,6 +221,8 @@ def resolve_microatm(manual_name: str, usb_devices: list = None) -> str:
     try:
         manual_name = (manual_name or "").strip()
         auto = auto_detect_microatm(usb_devices)
+        if manual_name and is_likely_virtual_usb_device(manual_name):
+            return auto or manual_name
         if auto and auto != manual_name:
             return auto
         return manual_name
@@ -286,6 +323,38 @@ def list_all_devices() -> list:
     return out
 
 
+def _name_prefix(name: str) -> str:
+    """Everything but the LAST whitespace-separated word, lowercased - the
+    "same device, different trailing detail" signature. Two real field cases
+    this exists for:
+      - A COM-port printer's name carries the port number, which can shift
+        after a replug/driver reset: "TVS RP3200 (COM4)" -> "TVS RP3200 (COM6)".
+      - A CSP typed the printer's physical model label, which differs from
+        the interface suffix Windows' own driver name uses: "EPSON PLQ-50 CSK"
+        (typed) vs "EPSON PLQ-50 ESC/P2" (actual Windows driver name) - both
+        share the "EPSON PLQ-50" prefix.
+    Returns "" unless at least TWO words remain after dropping the last one -
+    a single generic word (e.g. just "EPSON") is too permissive to match on,
+    so that case is deliberately excluded from the fallback below."""
+    parts = (name or "").strip().split()
+    return " ".join(parts[:-1]).lower() if len(parts) > 2 else ""
+
+
+def _find_by_name_or_prefix(configured_name: str, devices: list):
+    """Exact name match first; if that finds nothing, fall back to the
+    "same prefix, different last word" match ONLY when it is unambiguous
+    (exactly one present device shares that prefix) - otherwise still
+    "not found", never a guess between two genuinely different devices."""
+    for d in devices:
+        if d["name"] == configured_name:
+            return d
+    prefix = _name_prefix(configured_name)
+    if not prefix:
+        return None
+    matches = [d for d in devices if _name_prefix(d["name"]) == prefix]
+    return matches[0] if len(matches) == 1 else None
+
+
 def printer_status(configured_name: str, printers: list = None) -> dict:
     """Health of the ONE printer the CSP configured as their passbook printer.
     Pass an already-fetched `printers` list to reuse one scan instead of
@@ -295,9 +364,9 @@ def printer_status(configured_name: str, printers: list = None) -> dict:
     if not configured_name:
         return {"configured": False, "present": False, "ok": False, "status": "not configured"}
     printers = list_printers() if printers is None else printers
-    for p in printers:
-        if p["name"] == configured_name:
-            return {"configured": True, "present": True, "ok": p["ok"], "status": p["status"]}
+    match = _find_by_name_or_prefix(configured_name, printers)
+    if match:
+        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"]}
     return {"configured": True, "present": False, "ok": False,
             "status": "not found — check the printer is connected and installed"}
 
@@ -311,9 +380,9 @@ def microatm_status(configured_name: str, usb_devices: list = None) -> dict:
     if not configured_name:
         return {"configured": False, "present": False, "ok": False, "status": "not configured"}
     usb_devices = list_usb_devices() if usb_devices is None else usb_devices
-    for d in usb_devices:
-        if d["name"] == configured_name:
-            return {"configured": True, "present": True, "ok": d["ok"], "status": d["status"]}
+    match = _find_by_name_or_prefix(configured_name, usb_devices)
+    if match:
+        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"]}
     return {"configured": True, "present": False, "ok": False,
             "status": "not found — check the device is plugged in"}
 
@@ -348,7 +417,15 @@ def printer_functional_test(printer_name: str, wait_seconds: int = 6) -> dict:
         if not name.startswith(printer_name + ","):
             continue
         status = str(j.get("Status") or "").strip()
-        if status and status.lower() not in ("printing", "spooling", "printed", "normal"):
+        # "Unknown" is the CIM Status property's generic default when the
+        # print subsystem has nothing specific to report - many drivers
+        # (especially older dot-matrix/ESC-P2 passbook printer drivers) leave
+        # it as "Unknown" for jobs that printed successfully, not just for
+        # failed ones. A real field case: a CSP's printer worked and the
+        # connectivity check agreed, but the daily test print alone showed
+        # "problem: UNKNOWN" - a false positive from treating this generic
+        # default as if it were a specific error like "Paper Out"/"Door Open".
+        if status and status.lower() not in ("printing", "spooling", "printed", "normal", "unknown"):
             problems.add(status)
     if problems:
         return {"ran": True, "ok": False, "detail": "test page problem: " + ", ".join(sorted(problems))}
