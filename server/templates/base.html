@@ -24,9 +24,9 @@
   /* ---------- top nav ---------- */
   nav { background: var(--brand-teal); color: #fff; padding: 0 24px; display: flex; justify-content: space-between; align-items: center; height: 56px; }
   nav .brand { display: flex; align-items: center; gap: 10px; }
-  .eko-logo { display: flex; flex-direction: column; line-height: 1; }
-  .eko-logo .eko { display: inline-flex; align-items: center; color: var(--brand-orange); font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em; }
-  .eko-o { display: inline-block; width: 0.6em; height: 0.6em; border-radius: 50%; border: 0.17em solid currentColor; margin-left: 0.06em; }
+  .eko-logo { display: flex; flex-direction: column; line-height: 1; position: relative; }
+  .eko-logo .eko { position: relative; display: inline-flex; align-items: center; color: var(--brand-orange); font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em; }
+  .eko-o-glyph { width: 0.74em; height: 0.74em; margin: 0 0.02em; color: var(--brand-orange); flex-shrink: 0; overflow: visible; }
   .eko-logo .kiosk { color: #eaf4f5; font-weight: 700; font-size: 0.52rem; letter-spacing: 0.14em; margin-top: 1px; }
   .brand-sub { color: #a9d3d8; font-size: 0.75rem; font-weight: 500; padding-left: 10px; margin-left: 2px; border-left: 1px solid rgba(255,255,255,0.25); }
   .navlinks { display: flex; align-items: center; gap: 4px; height: 100%; }
@@ -120,7 +120,10 @@
 <body>
 <nav>
   <div class="brand">
-    <div class="eko-logo"><span class="eko">ek<span class="eko-o"></span></span><span class="kiosk">KIOSK</span></div>
+    <div class="eko-logo">
+      <span class="eko">ek<svg class="eko-o-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M 18.1 6.9 A 8 8 0 1 1 5.9 6.9" stroke-width="2.6"/><g stroke-width="1.2"><line x1="12" y1="5.2" x2="12" y2="1.5"/><line x1="13.7" y1="5.4" x2="14.6" y2="1.9"/><line x1="10.3" y1="5.4" x2="9.4" y2="1.9"/><line x1="15.3" y1="6.2" x2="17.1" y2="3.1"/><line x1="8.7" y1="6.2" x2="6.9" y2="3.1"/><line x1="16.7" y1="7.4" x2="19.2" y2="5.1"/><line x1="7.3" y1="7.4" x2="4.8" y2="5.1"/></g></svg></span>
+      <span class="kiosk">KIOSK</span>
+    </div>
     <span class="brand-sub">CSP Device Monitor</span>
   </div>
   <div class="navlinks">
