@@ -19,8 +19,18 @@ def _now() -> str:
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path())
+    # Without WAL mode, SQLite's default rollback-journal locking means any
+    # write (a CSP's heartbeat landing) blocks every other connection from
+    # even reading until it finishes - with many CSPs reporting every few
+    # minutes, an admin loading the dashboard can randomly stall waiting for
+    # whichever write happened to be in flight. WAL mode lets readers proceed
+    # concurrently with a single writer instead of blocking. busy_timeout is
+    # a safety net for the remaining rare case (two writes overlapping)
+    # instead of failing immediately with "database is locked".
+    conn = sqlite3.connect(db_path(), timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     return conn
 
 
