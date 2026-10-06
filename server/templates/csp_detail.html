@@ -16,10 +16,12 @@
 
 <div class="panel">
   <h2 style="font-size:1.05rem">Passbook printer</h2>
-  {% if not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>unknown - CSP offline</span>
+  <span class="note">last reported before going offline: {{ c.printer_status or ('ok' if c.printer_ok else 'problem') }}</span>
+  {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
   {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
   {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>{% endif %}
-  <span class="note">{{ c.printer_status or '' }}</span>
+  {% if not (c.devices_unknown and c.printer_configured) %}<span class="note">{{ c.printer_status or '' }}</span>{% endif %}
   {% if c.printer_test_ran %}
   <p class="note">Test print ({{ c.printer_test_checked_at | ist }}):
     {% if c.printer_test_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
@@ -33,17 +35,36 @@
 
 <div class="panel">
   <h2 style="font-size:1.05rem">Micro-ATM</h2>
-  {% if not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>unknown - CSP offline</span>
+  <span class="note">last reported before going offline: {{ c.microatm_status or ('ok' if c.microatm_ok else 'problem') }}</span>
+  {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
   {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
   {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>{% endif %}
-  <span class="note">{{ c.microatm_status or '' }}</span>
+  {% if not (c.devices_unknown and c.microatm_configured) %}<span class="note">{{ c.microatm_status or '' }}</span>{% endif %}
 </div>
+
+{% for dev, title in [('biometric', 'Biometric device (fingerprint scanner)'), ('gps', 'GPS dongle')] %}
+{% set configured = c[dev ~ '_configured'] %}
+<div class="panel">
+  <h2 style="font-size:1.05rem">{{ title }}</h2>
+  {% if not c.new_devices_reported %}<span class="badge badge-gray"><span class="dot"></span>not reported</span>
+  <span class="note">This CSP's agent is an older version that doesn't report this device yet.</span>
+  {% elif c.devices_unknown and configured %}<span class="badge badge-gray"><span class="dot"></span>unknown - CSP offline</span>
+  <span class="note">last reported before going offline: {{ c[dev ~ '_status'] or ('ok' if c[dev ~ '_ok'] else 'problem') }}</span>
+  {% elif not configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% elif c[dev ~ '_ok'] %}<span class="badge badge-green"><span class="dot"></span>ok</span>
+  <span class="note">{{ c[dev ~ '_status'] or '' }}</span>
+  {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>
+  <span class="note">{{ c[dev ~ '_status'] or '' }}</span>{% endif %}
+</div>
+{% endfor %}
 
 <p class="note">Printer/micro-ATM status above is a connectivity check (device
   present, not reporting an error). The printer also gets one real test print
   a day to catch paper-out/jam/door-open issues the connectivity check can't
   see; the micro-ATM has no safe way to test a real transaction, so it stays
-  connectivity-only.</p>
+  connectivity-only. The biometric scanner and GPS dongle follow the same
+  rule: present and reporting no driver error, not a live scan or location test.</p>
 
 {% if open_incidents %}
 <div class="panel" style="border-color:var(--bad)">

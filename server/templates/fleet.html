@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Fleet - CSP Device Monitor{% endblock %}
 {% block body %}
+{% macro device_cell(c, dev) %}
+  {% set configured = c[dev ~ '_configured'] %}
+  {% set ok = c[dev ~ '_ok'] %}
+  {% if not c.new_devices_reported %}<span class="note" title="This CSP's agent is an older version that doesn't report this device yet - update the agent">&ndash;</span>
+  {% elif c.devices_unknown and configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if ok else 'Problem' }}"><span class="dot"></span>Unknown</span>
+  {% elif not configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
+  {% elif ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
+  {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
+{% endmacro %}
 {% if refresh != '0' %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
   <div>
@@ -67,6 +76,22 @@
     <div class="kpi-value">{{ microatm_problems }}</div>
     <div class="kpi-label">Micro-ATM problems</div>
   </div>
+  <div class="kpi-card tint-bad">
+    <div class="kpi-top">
+      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 11v4"/><path d="M8 14v-3a4 4 0 0 1 8 0v3"/><path d="M5 14v-3a7 7 0 0 1 14 0v3"/></svg></div>
+      <span class="kpi-dot bad"></span>
+    </div>
+    <div class="kpi-value">{{ biometric_problems }}</div>
+    <div class="kpi-label">Biometric problems</div>
+  </div>
+  <div class="kpi-card tint-bad">
+    <div class="kpi-top">
+      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.2-7-11a7 7 0 0 1 14 0c0 5.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>
+      <span class="kpi-dot bad"></span>
+    </div>
+    <div class="kpi-value">{{ gps_problems }}</div>
+    <div class="kpi-label">GPS problems</div>
+  </div>
 </div>
 
 <form method="get" class="toolbar">
@@ -107,7 +132,7 @@
     <th><a href="{{ sort_urls.name }}">Name{% if sort == 'name' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
     <th><a href="{{ sort_urls.status }}">Status{% if sort == 'status' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
     <th><a href="{{ sort_urls.last_seen }}">Last report{% if sort == 'last_seen' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
-    <th>Printer status</th><th>Micro-ATM status</th>
+    <th>Printer status</th><th>Micro-ATM status</th><th>Biometric status</th><th>GPS status</th>
   </tr></thead>
   <tbody>
   {% for c in csps %}
@@ -122,19 +147,23 @@
       </td>
       <td title="{{ c.last_seen | ist }}" class="note">{{ c.last_seen | relative_time }}</td>
       <td>
-        {% if not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
+        {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.printer_ok else 'Problem' }}"><span class="dot"></span>Unknown</span>
+        {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
         {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
         {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
-        {% if c.printer_test_ran %}<div class="note" style="font-size:0.76rem;margin-top:3px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
+        {% if c.printer_test_ran and not c.devices_unknown %}<div class="note" style="font-size:0.76rem;margin-top:3px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
       </td>
       <td>
-        {% if not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
+        {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.microatm_ok else 'Problem' }}"><span class="dot"></span>Unknown</span>
+        {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
         {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
         {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
       </td>
+      <td>{{ device_cell(c, 'biometric') }}</td>
+      <td>{{ device_cell(c, 'gps') }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="note">
+    <tr><td colspan="8" class="note">
       {% if problems_only %}No open problems right now.
       {% elif q or status_filter %}No CSP matches this filter.
       {% else %}No CSP has reported yet.{% endif %}

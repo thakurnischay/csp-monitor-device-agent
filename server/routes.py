@@ -9,8 +9,8 @@ from urllib.parse import urlencode
 from flask import Blueprint, Response, flash, redirect, render_template, request, session, url_for
 
 from db import get_connection
-from device_state import (ONLINE_WINDOW_MIN, NEVER_REPORTED, OFFLINE, ONLINE, STALE,
-                          derive_csp_state, derive_device_state)
+from device_state import (ONLINE_WINDOW_MIN, NEVER_REPORTED, NOT_REPORTED, OFFLINE, ONLINE, STALE,
+                          UNKNOWN, derive_csp_state, derive_device_state)
 from events import record_audit
 from security import generate_api_key, hash_api_key, key_suffix, login_limiter
 
@@ -86,9 +86,42 @@ def _load_fleet(conn):
             r["printer_configured"], r["printer_present"], r["printer_ok"], r["printer_status"])
         d["microatm_state"] = derive_device_state(
             r["microatm_configured"], r["microatm_present"], r["microatm_ok"], r["microatm_status"])
+        # An offline CSP's device badges are just the LAST value it reported
+        # before going dark - not a live reading. Showing them with the same
+        # confident OK/Problem styling as a fresh report is misleading, so
+        # they're flagged "unknown" and every consumer (badges, KPI counts,
+        # problems filter, CSV) treats them that way.
+        d["devices_unknown"] = d["state"] == OFFLINE
+        # Agents older than schema_version 3 never report biometric/GPS at
+        # all - that is "not reported", NOT "no device", so it must not read
+        # as "Not set up" (which would claim the CSP has no scanner/dongle).
+        d["new_devices_reported"] = (r["schema_version"] or 0) >= 3
+        for dev in ("biometric", "gps"):
+            d[dev + "_state"] = derive_device_state(
+                r[dev + "_configured"], r[dev + "_present"], r[dev + "_ok"],
+                r[dev + "_status"]) if d["new_devices_reported"] else NOT_REPORTED
+        if d["devices_unknown"]:
+            d["printer_state"] = UNKNOWN
+            d["microatm_state"] = UNKNOWN
+            for dev in ("biometric", "gps"):
+                if d["new_devices_reported"]:
+                    d[dev + "_state"] = UNKNOWN
         d["name"] = (labels.get(d["csp_id"]) or "").strip() or d.get("name")
         csps.append(d)
     return csps
+
+
+_DEVICES = ("printer", "microatm", "biometric", "gps")
+
+
+def _device_problem(c, dev):
+    """A LIVE problem: configured, reporting not-ok, from a CSP that is not
+    offline and (for the newer devices) from an agent that reports them."""
+    if c["devices_unknown"]:
+        return False
+    if dev in ("biometric", "gps") and not c["new_devices_reported"]:
+        return False
+    return bool(c[dev + "_configured"]) and not c[dev + "_ok"]
 
 
 _SORT_KEYS = {
@@ -104,8 +137,7 @@ def _filter_and_sort(csps, q, status_filter, problems_only, sort, direction):
     if status_filter:
         csps = [c for c in csps if c["state"] == status_filter]
     if problems_only:
-        csps = [c for c in csps if not c["printer_ok"] and c["printer_configured"]
-               or not c["microatm_ok"] and c["microatm_configured"]]
+        csps = [c for c in csps if any(_device_problem(c, dev) for dev in _DEVICES)]
     key_fn = _SORT_KEYS.get(sort, _SORT_KEYS["name"])
     csps = sorted(csps, key=key_fn, reverse=(direction == "desc"))
     return csps
@@ -135,8 +167,10 @@ def fleet():
     stale = sum(1 for c in csps if c["state"] == STALE)
     offline = sum(1 for c in csps if c["state"] == OFFLINE)
     never_reported = sum(1 for c in csps if c["state"] == NEVER_REPORTED)
-    printer_problems = sum(1 for c in csps if c["printer_configured"] and not c["printer_ok"])
-    microatm_problems = sum(1 for c in csps if c["microatm_configured"] and not c["microatm_ok"])
+    printer_problems = sum(1 for c in csps if _device_problem(c, "printer"))
+    microatm_problems = sum(1 for c in csps if _device_problem(c, "microatm"))
+    biometric_problems = sum(1 for c in csps if _device_problem(c, "biometric"))
+    gps_problems = sum(1 for c in csps if _device_problem(c, "gps"))
 
     csps = _filter_and_sort(csps, q, status_filter, problems_only, sort, direction)
 
@@ -163,7 +197,8 @@ def fleet():
     return render_template("fleet.html", csps=page_csps, total=total_before_filter, matched=matched,
                           online=online, stale=stale, offline=offline, never_reported=never_reported,
                           window=ONLINE_WINDOW_MIN, printer_problems=printer_problems,
-                          microatm_problems=microatm_problems, q=q, status_filter=status_filter,
+                          microatm_problems=microatm_problems,
+                          biometric_problems=biometric_problems, gps_problems=gps_problems, q=q, status_filter=status_filter,
                           problems_only=problems_only, sort=sort, direction=direction,
                           page=page, total_pages=total_pages, refresh=refresh,
                           qs=qs, sort_urls=sort_urls, csv_url=csv_url,
@@ -188,10 +223,12 @@ def fleet_csv():
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["csp_id", "name", "status", "printer_state", "microatm_state", "last_seen_utc"])
+    writer.writerow(["csp_id", "name", "status", "printer_state", "microatm_state",
+                     "biometric_state", "gps_state", "last_seen_utc"])
     for c in csps:
         writer.writerow([c["csp_id"], c["name"] or "", c["state"],
-                         c["printer_state"], c["microatm_state"], c["last_seen"] or ""])
+                         c["printer_state"], c["microatm_state"],
+                         c["biometric_state"], c["gps_state"], c["last_seen"] or ""])
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=csp_fleet.csv"})
 
@@ -218,6 +255,8 @@ def csp_detail(csp_id):
         c["printer_configured"], c["printer_present"], c["printer_ok"], c["printer_status"])
     d["microatm_state"] = derive_device_state(
         c["microatm_configured"], c["microatm_present"], c["microatm_ok"], c["microatm_status"])
+    d["devices_unknown"] = d["state"] == OFFLINE
+    d["new_devices_reported"] = (c["schema_version"] or 0) >= 3
     if label and (label["name"] or "").strip():
         d["name"] = label["name"].strip()
     return render_template("csp_detail.html", c=d, events=events,

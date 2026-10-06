@@ -18,6 +18,7 @@ NOT_CONFIGURED = "NOT_CONFIGURED"
 NOT_DETECTED = "NOT_DETECTED"
 SCAN_ERROR = "SCAN_ERROR"
 UNKNOWN = "UNKNOWN"
+NOT_REPORTED = "NOT_REPORTED"  # agent too old to report this device at all
 
 # States that represent an actionable problem worth an incident.
 PROBLEM_STATES = {PROBLEM, NOT_DETECTED, SCAN_ERROR}

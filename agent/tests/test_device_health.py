@@ -169,6 +169,81 @@ class NamePrefixFallbackTests(unittest.TestCase):
         self.assertTrue(result["present"])
 
 
+class BiometricAndGpsTests(unittest.TestCase):
+    """Fingerprint scanner and USB GPS dongle detection, added alongside the
+    printer/micro-ATM checks. Same rules: recognize by vendor/name only when
+    unambiguous, never pick a software placeholder, never guess."""
+
+    def test_known_fingerprint_scanner_is_recognized(self):
+        usb = [{"name": "Mantra MFS100 Biometric Device", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_biometric(usb), "Mantra MFS100 Biometric Device")
+
+    def test_laptop_builtin_reader_is_not_mistaken_for_the_scanner(self):
+        usb = [{"name": "Synaptics UWP WBDI", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_biometric(usb), "")
+
+    def test_a_micro_atm_is_never_picked_as_the_scanner(self):
+        usb = [{"name": "Ingenico Move 5000", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_biometric(usb), "")
+
+    def test_vendor_driver_placeholder_is_never_picked_as_the_scanner(self):
+        usb = [{"name": "MantraEnum", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_biometric(usb), "")
+
+    def test_gps_dongle_with_gps_in_its_name_is_recognized(self):
+        devs = [{"name": "u-blox 7 - GPS/GNSS Receiver", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_gps(devs), "u-blox 7 - GPS/GNSS Receiver")
+
+    def test_generic_usb_serial_dongle_is_not_guessed_as_gps(self):
+        # Needs a human's one-time pick - a generic serial chip could equally
+        # be a COM-port printer.
+        devs = [{"name": "USB-SERIAL CH340 (COM3)", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.auto_detect_gps(devs), "")
+
+    def test_a_working_manual_pick_is_never_overridden(self):
+        devs = [{"name": "USB-SERIAL CH340 (COM3)", "ok": True, "status": "OK"},
+                {"name": "u-blox 7 - GPS/GNSS Receiver", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.resolve_gps("USB-SERIAL CH340 (COM3)", devs), "USB-SERIAL CH340 (COM3)")
+
+    def test_a_missing_manual_pick_is_replaced_by_a_confident_recognition(self):
+        devs = [{"name": "Mantra MFS100 Biometric Device", "ok": True, "status": "OK"}]
+        self.assertEqual(dh.resolve_biometric("Old Scanner Name", devs), "Mantra MFS100 Biometric Device")
+
+    def test_status_not_configured_present_and_missing(self):
+        devs = [{"name": "Mantra MFS100 Biometric Device", "ok": True, "status": "OK"}]
+        self.assertFalse(dh.biometric_status("", devs)["configured"])
+        self.assertTrue(dh.biometric_status("Mantra MFS100 Biometric Device", devs)["ok"])
+        gone = dh.gps_status("u-blox 7 - GPS/GNSS Receiver", [])
+        self.assertTrue(gone["configured"])
+        self.assertFalse(gone["present"])
+
+    def test_check_reports_both_devices_from_the_existing_scans(self):
+        with mock.patch.object(dh, "list_printers", return_value=[]),              mock.patch.object(dh, "list_usb_devices", return_value=[
+                 {"name": "Mantra MFS100 Biometric Device", "ok": True, "status": "OK"}]),              mock.patch.object(dh, "list_all_devices", return_value=[
+                 {"name": "u-blox GNSS Location Sensor", "class": "Sensor", "ok": True, "status": "OK"}]),              mock.patch.object(dh, "process_running", return_value={"configured": False, "running": False}):
+            result = dh.check("", "", "")
+        self.assertTrue(result["biometric"]["present"])
+        self.assertEqual(result["biometric"]["resolved_name"], "Mantra MFS100 Biometric Device")
+        self.assertTrue(result["gps"]["present"])
+        self.assertEqual(result["gps"]["resolved_name"], "u-blox GNSS Location Sensor")
+        self.assertIn("u-blox GNSS Location Sensor", [d["name"] for d in result["gps_device_list"]])
+
+    def test_a_com_port_device_is_offered_in_the_gps_dropdown(self):
+        with mock.patch.object(dh, "list_printers", return_value=[]),              mock.patch.object(dh, "list_usb_devices", return_value=[]),              mock.patch.object(dh, "list_all_devices", return_value=[
+                 {"name": "USB-SERIAL CH340 (COM3)", "class": "Ports", "ok": True, "status": "OK"}]),              mock.patch.object(dh, "process_running", return_value={"configured": False, "running": False}):
+            result = dh.check("", "", "")
+        self.assertIn("USB-SERIAL CH340 (COM3)", [d["name"] for d in result["gps_device_list"]])
+        self.assertEqual(result["gps"]["resolved_name"], "")  # not auto-picked
+
+    def test_timeout_fallback_still_returns_every_key_callers_read(self):
+        with mock.patch.object(dh, "_CHECK_HARD_TIMEOUT", 1),              mock.patch.object(dh, "list_printers", side_effect=lambda: time.sleep(30)):
+            result = dh.check("", "", "")
+        for key in ("printer", "microatm", "biometric", "gps", "software",
+                    "printer_list", "usb_device_list", "biometric_device_list", "gps_device_list"):
+            self.assertIn(key, result)
+        self.assertIn("timed out", result["biometric"]["status"])
+
+
 class TimeoutProtectionTests(unittest.TestCase):
     def test_run_with_ceiling_bounds_a_hanging_function(self):
         def hangs_forever(seconds):

@@ -113,6 +113,59 @@ class FleetFilterTests(RouteTestCase):
         self.assertNotIn("A1", text)
 
 
+class OfflineCspDeviceStatusTests(RouteTestCase):
+    """An offline CSP's printer/micro-ATM values are just the last thing it
+    reported before going dark - not a live reading. They must not be shown
+    (or counted) as a confident OK/Problem."""
+
+    def setUp(self):
+        super().setUp()
+        self._login()
+        import db
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        two_days_ago = (now - timedelta(days=2)).isoformat(timespec="seconds")
+        fresh = now.isoformat(timespec="seconds")
+        with db.get_connection() as conn:
+            # Offline for 2 days, last report said micro-ATM OK, printer problem
+            conn.execute("""INSERT INTO csps (csp_id, name, printer_configured, printer_present, printer_ok,
+                             microatm_configured, microatm_present, microatm_ok, first_seen, last_seen)
+                             VALUES ('OFF1','Offline Olga',1,1,0,1,1,1,?,?)""", (two_days_ago, two_days_ago))
+            # Online right now, with a genuine live printer problem
+            conn.execute("""INSERT INTO csps (csp_id, name, printer_configured, printer_present, printer_ok,
+                             microatm_configured, microatm_present, microatm_ok, first_seen, last_seen)
+                             VALUES ('ON1','Online Omar',1,1,0,1,1,1,?,?)""", (fresh, fresh))
+            conn.commit()
+
+    def test_offline_csps_devices_show_unknown_not_a_stale_ok(self):
+        html = self.client.get("/").get_data(as_text=True)
+        row = html.split("Offline Olga")[1].split("</tr>")[0]
+        self.assertIn("Unknown", row)
+        # The row's own Status badge is red (Offline), so ANY green badge in
+        # it would be a stale "OK" leaking through for the micro-ATM.
+        self.assertNotIn("badge-green", row)
+
+    def test_offline_csps_stale_problems_do_not_inflate_the_kpi_counts(self):
+        html = self.client.get("/").get_data(as_text=True)
+        # Only the ONLINE CSP's printer problem counts (1), not the offline one's.
+        m = re.search(r'kpi-value">(\d+)</div>\s*<div class="kpi-label">Printer problems', html)
+        self.assertEqual(m.group(1), "1")
+
+    def test_problems_only_excludes_offline_csps(self):
+        html = self.client.get("/?problems_only=1").get_data(as_text=True)
+        self.assertIn("Online Omar", html)
+        self.assertNotIn("Offline Olga", html)
+
+    def test_csv_reports_unknown_for_offline_csp_devices(self):
+        text = self.client.get("/fleet.csv").get_data(as_text=True)
+        olga = [l for l in text.splitlines() if l.startswith("OFF1")][0]
+        self.assertIn("UNKNOWN", olga)
+
+    def test_detail_page_labels_offline_device_status_as_unknown(self):
+        html = self.client.get("/csp/OFF1").get_data(as_text=True)
+        self.assertIn("unknown - CSP offline", html)
+
+
 class ApiKeyManagementTests(RouteTestCase):
     def setUp(self):
         super().setUp()

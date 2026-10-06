@@ -18,6 +18,8 @@ DEFAULTS = {
     "server_url": "http://localhost:5100",
     "printer_name": "",
     "microatm_name": "",
+    "biometric_name": "",
+    "gps_name": "",
     "software_process": "",
     "interval_seconds": 300,
     # Internal state for the once-a-day printer test print (see reporter.py) —

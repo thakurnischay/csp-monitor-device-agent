@@ -72,12 +72,15 @@ def _safe_hostname() -> str:
 
 def build_payload(cfg: dict) -> dict:
     health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
-                                 cfg.get("software_process", ""))
+                                 cfg.get("software_process", ""),
+                                 cfg.get("biometric_name", ""), cfg.get("gps_name", ""))
     # Self-configure: a confidently-recognized real device gets saved as the
     # actual selection, not just used transiently for this one check - so a
     # CSP with a recognizable printer and/or micro-ATM needs zero manual setup.
     config_store.sync_resolved_device("printer_name", health["printer"].get("resolved_name", ""))
     config_store.sync_resolved_device("microatm_name", health["microatm"].get("resolved_name", ""))
+    config_store.sync_resolved_device("biometric_name", health["biometric"].get("resolved_name", ""))
+    config_store.sync_resolved_device("gps_name", health["gps"].get("resolved_name", ""))
     resolved_printer_name = health["printer"].get("resolved_name") or cfg.get("printer_name", "")
     functional = _maybe_run_printer_functional_test(
         cfg, resolved_printer_name, health["printer"].get("present", False))
@@ -90,6 +93,8 @@ def build_payload(cfg: dict) -> dict:
         "reported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "printer": health["printer"],
         "microatm": health["microatm"],
+        "biometric": health["biometric"],
+        "gps": health["gps"],
         "printer_functional_test": functional,
     }
 

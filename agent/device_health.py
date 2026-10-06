@@ -103,6 +103,26 @@ _KNOWN_MICROATM_BRANDS = (
     "electracard", "cygnet", "m2i", "wcbs", "genesys", "smart chip",
 )
 
+# Fingerprint/biometric scanners (Aadhaar auth) - vendor and model names only.
+# Deliberately NO generic words like "biometric"/"fingerprint": a laptop's
+# built-in Windows Hello reader sits in the same PnP class and is not the
+# scanner the CSP uses for transactions.
+_KNOWN_BIOMETRIC_BRANDS = (
+    "mantra", "morpho", "idemia", "secugen", "startek", "precision biometric",
+    "bioenable", "tatvik", "evolute", "aratek", "next biometrics", "cogent",
+    "mfs100", "mfs110", "mis100", "fm220", "mso1300", "mso 1300",
+)
+
+# USB GPS dongles (the "GPS Dongle Status" column in the ops Calling Sheet).
+# Many dongles use a generic USB-serial chip and show up as just "USB-SERIAL
+# CH340 (COM3)" with no GPS in the name - those can't be recognized by name
+# and need a human's one-time pick from the dropdown, same as COM-port printers.
+_KNOWN_GPS_BRANDS = (
+    "gps", "gnss", "u-blox", "ublox", "g-mouse", "globalsat", "navilock",
+    "garmin", "sirf",
+)
+_GPS_CANDIDATE_CLASSES = ("Ports", "Sensor", "Location")
+
 
 def run_with_ceiling(func, timeout: float, *args, **kwargs):
     """Run `func` with a hard wall-clock ceiling, regardless of what's
@@ -387,6 +407,89 @@ def microatm_status(configured_name: str, usb_devices: list = None) -> dict:
             "status": "not found — check the device is plugged in"}
 
 
+def _auto_detect_by_brand(devices: list, brands: tuple) -> str:
+    real = [d for d in devices if not is_likely_virtual_usb_device(d["name"])]
+    return _best_brand_match(real, brands) or ""
+
+
+def _resolve_keeping_a_working_pick(manual_name: str, devices: list, auto: str) -> str:
+    """Biometric/GPS selection rule: a manual pick that is a real, currently
+    present device is never overridden - auto-detection only fills in when
+    the pick is blank, a software placeholder, or no longer present. (The
+    printer/micro-ATM resolvers override any differing manual pick, which has
+    caused wrong silent re-selections in the field; the newer devices do not
+    inherit that.)"""
+    manual_name = (manual_name or "").strip()
+    if (manual_name and not is_likely_virtual_usb_device(manual_name)
+            and _find_by_name_or_prefix(manual_name, devices)):
+        return manual_name
+    return auto or manual_name
+
+
+def auto_detect_biometric(devices: list = None) -> str:
+    """Best-guess fingerprint scanner by known vendor/model, or "" if none or
+    ambiguous. Never raises."""
+    try:
+        devices = list_usb_devices() if devices is None else devices
+        return _auto_detect_by_brand(devices, _KNOWN_BIOMETRIC_BRANDS)
+    except Exception:
+        return ""
+
+
+def auto_detect_gps(devices: list = None) -> str:
+    """Best-guess GPS dongle by name, or "" if none/ambiguous/generic serial
+    chip. Never raises."""
+    try:
+        devices = list_usb_devices() if devices is None else devices
+        return _auto_detect_by_brand(devices, _KNOWN_GPS_BRANDS)
+    except Exception:
+        return ""
+
+
+def resolve_biometric(manual_name: str, devices: list = None) -> str:
+    try:
+        devices = list_usb_devices() if devices is None else devices
+        return _resolve_keeping_a_working_pick(
+            manual_name, devices, auto_detect_biometric(devices))
+    except Exception:
+        return (manual_name or "").strip()
+
+
+def resolve_gps(manual_name: str, devices: list = None) -> str:
+    try:
+        devices = list_usb_devices() if devices is None else devices
+        return _resolve_keeping_a_working_pick(
+            manual_name, devices, auto_detect_gps(devices))
+    except Exception:
+        return (manual_name or "").strip()
+
+
+def _device_status(configured_name: str, devices: list, not_found: str) -> dict:
+    configured_name = (configured_name or "").strip()
+    if not configured_name:
+        return {"configured": False, "present": False, "ok": False, "status": "not configured"}
+    match = _find_by_name_or_prefix(configured_name, devices)
+    if match:
+        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"]}
+    return {"configured": True, "present": False, "ok": False, "status": not_found}
+
+
+def biometric_status(configured_name: str, devices: list = None) -> dict:
+    """Connectivity health of the CSP's fingerprint scanner (present + Windows
+    reports the driver OK). {"configured", "present", "ok", "status"} - never
+    raises."""
+    devices = list_usb_devices() if devices is None else devices
+    return _device_status(configured_name, devices,
+                          "not found — check the fingerprint scanner is plugged in")
+
+
+def gps_status(configured_name: str, devices: list = None) -> dict:
+    """Connectivity health of the CSP's GPS dongle. Never raises."""
+    devices = list_usb_devices() if devices is None else devices
+    return _device_status(configured_name, devices,
+                          "not found — check the GPS dongle is plugged in")
+
+
 def printer_functional_test(printer_name: str, wait_seconds: int = 6) -> dict:
     """Sends a real Windows test page to the named printer, then reads that
     print job's own status for problems invisible to printer_status() alone —
@@ -470,7 +573,8 @@ def _apply_software_signal(hw: dict, software: dict) -> dict:
     return hw
 
 
-def check(printer_name: str, microatm_name: str, software_process: str = "") -> dict:
+def check(printer_name: str, microatm_name: str, software_process: str = "",
+          biometric_name: str = "", gps_name: str = "") -> dict:
     """Combined snapshot for the reporter loop and the local status page.
     Wrapped in run_with_ceiling() so this ALWAYS returns within
     _CHECK_HARD_TIMEOUT seconds no matter what's blocking underneath (Smart
@@ -478,18 +582,22 @@ def check(printer_name: str, microatm_name: str, software_process: str = "") -> 
     query, ...) - the caller (an HTTP request) must never hang forever.
     Never raises."""
     result = run_with_ceiling(_check_impl, _CHECK_HARD_TIMEOUT,
-                              printer_name, microatm_name, software_process)
+                              printer_name, microatm_name, software_process,
+                              biometric_name, gps_name)
     if result is not None:
         return result
     timed_out = {"configured": False, "present": False, "ok": False,
                 "status": "scan timed out - a security tool on this PC "
                           "(Smart App Control/antivirus) may be blocking the check"}
     return {"printer": dict(timed_out), "microatm": dict(timed_out),
+            "biometric": dict(timed_out), "gps": dict(timed_out),
             "software": {"configured": False, "running": False},
-            "printer_list": [], "usb_device_list": []}
+            "printer_list": [], "usb_device_list": [],
+            "biometric_device_list": [], "gps_device_list": []}
 
 
-def _check_impl(printer_name: str, microatm_name: str, software_process: str = "") -> dict:
+def _check_impl(printer_name: str, microatm_name: str, software_process: str = "",
+                biometric_name: str = "", gps_name: str = "") -> dict:
     """The actual check() body, run inside run_with_ceiling()'s worker thread.
     The manual printer_name/microatm_name picks are passed through
     resolve_printer/resolve_microatm first, so a wrong or stale manual
@@ -545,8 +653,27 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
             usb_names_seen.add(d["name"])
     usb_devices = usb_devices + extra_usb_candidates
 
+    # Biometric/GPS candidates come from the SAME three scans - no extra
+    # PowerShell calls (ScanEfficiencyTests pins the count at exactly 3).
+    bio_devices = list(usb_devices)
+    bio_seen = {d["name"] for d in bio_devices}
+    for d in all_devices:
+        if d["name"] not in bio_seen and any(kw in d["name"].lower() for kw in _KNOWN_BIOMETRIC_BRANDS):
+            bio_devices.append(d)
+            bio_seen.add(d["name"])
+    gps_devices = list(usb_devices)
+    gps_seen = {d["name"] for d in gps_devices}
+    for d in all_devices:
+        if d["name"] in gps_seen:
+            continue
+        if d["class"] in _GPS_CANDIDATE_CLASSES or any(kw in d["name"].lower() for kw in _KNOWN_GPS_BRANDS):
+            gps_devices.append(d)
+            gps_seen.add(d["name"])
+
     resolved_printer_name = resolve_printer(printer_name, printers)
     resolved_microatm_name = resolve_microatm(microatm_name, usb_devices)
+    resolved_biometric_name = resolve_biometric(biometric_name, bio_devices)
+    resolved_gps_name = resolve_gps(gps_name, gps_devices)
     try:
         printer = printer_status(resolved_printer_name, printers)
     except Exception:
@@ -559,9 +686,21 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
         software = process_running(software_process)
     except Exception:
         software = {"configured": False, "running": False}
+    try:
+        biometric = biometric_status(resolved_biometric_name, bio_devices)
+    except Exception:
+        biometric = {"configured": False, "present": False, "ok": False, "status": "check failed"}
+    try:
+        gps = gps_status(resolved_gps_name, gps_devices)
+    except Exception:
+        gps = {"configured": False, "present": False, "ok": False, "status": "check failed"}
     printer = _apply_software_signal(printer, software)
     microatm = _apply_software_signal(microatm, software)
     printer["resolved_name"] = resolved_printer_name
     microatm["resolved_name"] = resolved_microatm_name
-    return {"printer": printer, "microatm": microatm, "software": software,
-            "printer_list": printers, "usb_device_list": usb_devices}
+    biometric["resolved_name"] = resolved_biometric_name
+    gps["resolved_name"] = resolved_gps_name
+    return {"printer": printer, "microatm": microatm,
+            "biometric": biometric, "gps": gps, "software": software,
+            "printer_list": printers, "usb_device_list": usb_devices,
+            "biometric_device_list": bio_devices, "gps_device_list": gps_devices}

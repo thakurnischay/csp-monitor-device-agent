@@ -88,6 +88,14 @@ def _migrate_csps_columns(conn):
         "schema_version": "INTEGER",
         "os_info": "TEXT",
         "hostname": "TEXT",
+        "biometric_configured": "INTEGER NOT NULL DEFAULT 0",
+        "biometric_present": "INTEGER NOT NULL DEFAULT 0",
+        "biometric_ok": "INTEGER NOT NULL DEFAULT 0",
+        "biometric_status": "TEXT",
+        "gps_configured": "INTEGER NOT NULL DEFAULT 0",
+        "gps_present": "INTEGER NOT NULL DEFAULT 0",
+        "gps_ok": "INTEGER NOT NULL DEFAULT 0",
+        "gps_status": "TEXT",
     }
     for col_name, col_type in new_columns.items():
         if col_name not in existing:

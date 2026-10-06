@@ -56,6 +56,22 @@ PAGE = """
   <input id="microatmSelect" list="microatmOptions" placeholder="Pick from the list, or type the exact device name">
   <datalist id="microatmOptions"></datalist>
 
+  <div class="row" style="margin-top:14px"><span><strong>Biometric device (fingerprint scanner)</strong></span><span id="biometricBadge" class="badge off">checking...</span></div>
+  <div id="biometricDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
+  <div id="biometricAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
+  <label>Which USB device is it?</label>
+  <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Filled in automatically for known fingerprint-scanner brands (Mantra, Morpho, SecuGen, Startek and others). If it can't recognize yours, pick from the list, or type the exact device name. Leave it blank if this PC has no fingerprint scanner.</div>
+  <input id="biometricSelect" list="biometricOptions" placeholder="Pick from the list, or type the exact device name">
+  <datalist id="biometricOptions"></datalist>
+
+  <div class="row" style="margin-top:14px"><span><strong>GPS dongle</strong></span><span id="gpsBadge" class="badge off">checking...</span></div>
+  <div id="gpsDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
+  <div id="gpsAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
+  <label>Which device is it?</label>
+  <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Filled in automatically when the dongle's name says GPS/GNSS (u-blox, G-Mouse and similar). Many dongles only show up as a generic "USB-SERIAL ... (COM3)" device - if so, pick it from the list yourself. Leave it blank if this PC has no GPS dongle.</div>
+  <input id="gpsSelect" list="gpsOptions" placeholder="Pick from the list, or type the exact device name">
+  <datalist id="gpsOptions"></datalist>
+
   <button onclick="saveDevices()">Save device selection</button>
 </div>
 
@@ -160,15 +176,21 @@ function loadStatus() {
   var slowTimer = setTimeout(function () {
     document.getElementById("printerDetail").textContent = "Still checking - this can take up to 20-30 seconds on some PCs.";
     document.getElementById("microatmDetail").textContent = "Still checking - this can take up to 20-30 seconds on some PCs.";
+    document.getElementById("biometricDetail").textContent = "Still checking - this can take up to 20-30 seconds on some PCs.";
+    document.getElementById("gpsDetail").textContent = "Still checking - this can take up to 20-30 seconds on some PCs.";
   }, 4000);
   xhrJson("GET", "/status", null, function (d) {
     clearTimeout(slowTimer);
     if (!d) { document.getElementById("msg").textContent = "Could not load status from the agent - is it still running?"; return; }
     badge("printerBadge", "printerDetail", d.printer, "printerAutoNote", d.config.printer_name);
     badge("microatmBadge", "microatmDetail", d.microatm, "microatmAutoNote", d.config.microatm_name);
+    badge("biometricBadge", "biometricDetail", d.biometric, "biometricAutoNote", d.config.biometric_name);
+    badge("gpsBadge", "gpsDetail", d.gps, "gpsAutoNote", d.config.gps_name);
     functionalNote("printerFunctionalNote", d.printer_functional_test);
     fillSelect(document.getElementById("printerSelect"), document.getElementById("printerOptions"), d.available_printers, d.config.printer_name);
     fillSelect(document.getElementById("microatmSelect"), document.getElementById("microatmOptions"), d.available_usb_devices, d.config.microatm_name);
+    fillSelect(document.getElementById("biometricSelect"), document.getElementById("biometricOptions"), d.available_biometric_devices, d.config.biometric_name);
+    fillSelect(document.getElementById("gpsSelect"), document.getElementById("gpsOptions"), d.available_gps_devices, d.config.gps_name);
     document.getElementById("serverUrl").value = d.config.server_url || "";
     document.getElementById("cspId").value = d.config.csp_id || "";
     document.getElementById("softwareProcess").value = d.config.software_process || "";
@@ -185,7 +207,9 @@ function saveDevices() {
   document.getElementById("msg").textContent = "Saving...";
   xhrJson("POST", "/configure", {
     printer_name: document.getElementById("printerSelect").value,
-    microatm_name: document.getElementById("microatmSelect").value
+    microatm_name: document.getElementById("microatmSelect").value,
+    biometric_name: document.getElementById("biometricSelect").value,
+    gps_name: document.getElementById("gpsSelect").value
   }, function () {
     document.getElementById("msg").textContent = "Device selection saved.";
     loadStatus();
@@ -259,12 +283,15 @@ def index():
 def status():
     cfg = config_store.load()
     health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
-                                 cfg.get("software_process", ""))
+                                 cfg.get("software_process", ""),
+                                 cfg.get("biometric_name", ""), cfg.get("gps_name", ""))
     # Self-configure: a confidently-recognized real device gets saved as the
     # actual selection, so the dropdown (and the dashboard) show it without
     # anyone touching Save - re-read cfg so THIS same page load reflects it.
     config_store.sync_resolved_device("printer_name", health["printer"].get("resolved_name", ""))
     config_store.sync_resolved_device("microatm_name", health["microatm"].get("resolved_name", ""))
+    config_store.sync_resolved_device("biometric_name", health["biometric"].get("resolved_name", ""))
+    config_store.sync_resolved_device("gps_name", health["gps"].get("resolved_name", ""))
     cfg = config_store.load()
     safe_cfg = {k: v for k, v in cfg.items() if k != "api_key"}
     current_printer = cfg.get("printer_name", "")
@@ -281,13 +308,23 @@ def status():
     # incorrectly before this filter existed.
     usb_devices = [d["name"] for d in health["usb_device_list"]
                   if d["name"] == current_microatm or not device_health.is_likely_virtual_usb_device(d["name"])]
+    current_biometric = cfg.get("biometric_name", "")
+    current_gps = cfg.get("gps_name", "")
+    biometric_devices = [d["name"] for d in health["biometric_device_list"]
+                         if d["name"] == current_biometric or not device_health.is_likely_virtual_usb_device(d["name"])]
+    gps_devices = [d["name"] for d in health["gps_device_list"]
+                   if d["name"] == current_gps or not device_health.is_likely_virtual_usb_device(d["name"])]
     return jsonify({
         "printer": health["printer"],
         "microatm": health["microatm"],
+        "biometric": health["biometric"],
+        "gps": health["gps"],
         "software": health["software"],
         "config": safe_cfg,
         "available_printers": printers,
         "available_usb_devices": usb_devices,
+        "available_biometric_devices": biometric_devices,
+        "available_gps_devices": gps_devices,
         "printer_functional_test": {
             "date": cfg.get("last_printer_test_date", ""),
             "result": cfg.get("last_printer_test_result", {}),
@@ -298,8 +335,8 @@ def status():
 @app.route("/configure", methods=["POST"])
 def configure():
     data = request.get_json(silent=True) or {}
-    allowed = {"printer_name", "microatm_name", "software_process", "server_url",
-              "csp_id", "api_key", "interval_seconds"}
+    allowed = {"printer_name", "microatm_name", "biometric_name", "gps_name",
+              "software_process", "server_url", "csp_id", "api_key", "interval_seconds"}
     # Strip whitespace on every string field - a stray leading/trailing space
     # from a copy-paste (easy to pick up when copying the API key, which is
     # shown once and never re-shown) makes the saved value byte-for-byte
@@ -308,7 +345,7 @@ def configure():
     data = {k: (v.strip() if isinstance(v, str) else v) for k, v in data.items()}
     updates = {k: v for k, v in data.items() if k in allowed and v not in (None, "")}
     # An explicitly blank device/software selection should still clear it.
-    for k in ("printer_name", "microatm_name", "software_process"):
+    for k in ("printer_name", "microatm_name", "biometric_name", "gps_name", "software_process"):
         if k in data and data[k] == "":
             updates[k] = ""
     config_store.save(**updates)

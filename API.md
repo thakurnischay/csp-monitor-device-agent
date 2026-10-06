@@ -30,8 +30,10 @@ The one endpoint the agent calls. Also usable for manual/scripted testing.
 | `csp_id` | string | yes | Must match the CSP the API key was issued for |
 | `printer` | object | no | `{configured, present, ok, status, resolved_name}` |
 | `microatm` | object | no | same shape as `printer` |
+| `biometric` | object | no | fingerprint scanner, same shape as `printer` (agent `schema_version` 3+). Omitted by older agents - the server then leaves its stored values untouched and the dashboard shows a dash, not "Not set up" |
+| `gps` | object | no | USB GPS dongle, same shape as `printer` (agent `schema_version` 3+), same omission rule as `biometric` |
 | `printer_functional_test` | object | no | `{ran, ok, detail}` |
-| `schema_version` | int | no | `2` for the current agent |
+| `schema_version` | int | no | `3` for the current agent (`2` = no biometric/GPS) |
 | `agent_version` | string | no | e.g. `"1.1.0"` |
 | `os` | string | no | e.g. `"Windows-10-10.0.26200-SP0"` |
 | `hostname` | string | no | the CSP PC's machine name |
