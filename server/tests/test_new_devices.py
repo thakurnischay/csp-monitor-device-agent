@@ -160,7 +160,7 @@ class DashboardShowsNewDevicesTests(RouteTestCase):
 
     def test_offline_v3_csp_shows_unknown_for_the_new_devices(self):
         text = self._row_text(self.client.get("/").get_data(as_text=True), "Offline Vee")
-        self.assertTrue(text.endswith("Unknown Unknown"), text)
+        self.assertTrue(text.endswith("Unknown CSP offline Unknown CSP offline"), text)
 
     def test_kpi_counts_only_live_problems_from_agents_that_report_them(self):
         html = self.client.get("/").get_data(as_text=True)
