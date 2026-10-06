@@ -16,7 +16,7 @@
 
 <div class="panel">
   <h2 style="font-size:1.05rem">Passbook printer</h2>
-  {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>unknown - CSP offline</span>
+  {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
   <span class="note">last reported before going offline: {{ c.printer_status or ('ok' if c.printer_ok else 'problem') }}</span>
   {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
   {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
@@ -35,7 +35,7 @@
 
 <div class="panel">
   <h2 style="font-size:1.05rem">Micro-ATM</h2>
-  {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>unknown - CSP offline</span>
+  {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
   <span class="note">last reported before going offline: {{ c.microatm_status or ('ok' if c.microatm_ok else 'problem') }}</span>
   {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
   {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
@@ -49,7 +49,7 @@
   <h2 style="font-size:1.05rem">{{ title }}</h2>
   {% if not c.new_devices_reported %}<span class="badge badge-gray"><span class="dot"></span>not reported</span>
   <span class="note">This CSP's agent is an older version that doesn't report this device yet.</span>
-  {% elif c.devices_unknown and configured %}<span class="badge badge-gray"><span class="dot"></span>unknown - CSP offline</span>
+  {% elif c.devices_unknown and configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
   <span class="note">last reported before going offline: {{ c[dev ~ '_status'] or ('ok' if c[dev ~ '_ok'] else 'problem') }}</span>
   {% elif not configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
   {% elif c[dev ~ '_ok'] %}<span class="badge badge-green"><span class="dot"></span>ok</span>

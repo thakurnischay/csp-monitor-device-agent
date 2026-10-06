@@ -160,7 +160,7 @@ class DashboardShowsNewDevicesTests(RouteTestCase):
 
     def test_offline_v3_csp_shows_unknown_for_the_new_devices(self):
         text = self._row_text(self.client.get("/").get_data(as_text=True), "Offline Vee")
-        self.assertTrue(text.endswith("Unknown CSP offline Unknown CSP offline"), text)
+        self.assertTrue(text.endswith("Disconnected CSP offline Disconnected CSP offline"), text)
 
     def test_kpi_counts_only_live_problems_from_agents_that_report_them(self):
         html = self.client.get("/").get_data(as_text=True)
@@ -190,7 +190,7 @@ class DashboardShowsNewDevicesTests(RouteTestCase):
         old = self.client.get("/csp/OLDAG").get_data(as_text=True)
         self.assertIn("older version that doesn't report this device yet", old)
         off = self.client.get("/csp/OFFV3").get_data(as_text=True)
-        self.assertIn("unknown - CSP offline", off)
+        self.assertIn("disconnected - CSP offline", off)
 
 
 if __name__ == "__main__":

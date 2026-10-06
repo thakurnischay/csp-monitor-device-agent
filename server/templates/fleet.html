@@ -5,7 +5,7 @@
   {% set configured = c[dev ~ '_configured'] %}
   {% set ok = c[dev ~ '_ok'] %}
   {% if not c.new_devices_reported %}<span class="note" title="This CSP's agent is an older version that doesn't report this device yet - update the agent">&ndash;</span>
-  {% elif c.devices_unknown and configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if ok else 'Problem' }}"><span class="dot"></span>Unknown</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
+  {% elif c.devices_unknown and configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
   {% elif not configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
   {% elif ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
   {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
@@ -26,7 +26,7 @@
     </div>
   </div>
 </div>
-<p class="note" style="margin-top:10px">Online = reported within the last {{ window }} minutes; Stale = reported within the last hour but not recently; Offline = longer than that, or never. <strong>Unknown</strong> under a device means the CSP is offline, so its current device status can't be checked (it is not a fault). A dash (&ndash;) means that CSP's agent is an older version that doesn't report that device yet.</p>
+<p class="note" style="margin-top:10px">Online = reported within the last {{ window }} minutes; Stale = reported within the last hour but not recently; Offline = longer than that, or never. <strong>Disconnected</strong> under a device means the CSP's PC is offline, so the device's current status can't be checked (last known status is shown on hover). A dash (&ndash;) means that CSP's agent is an older version that doesn't report that device yet.</p>
 
 <div class="kpi-grid">
   <div class="kpi-card">
@@ -147,14 +147,14 @@
       </td>
       <td title="{{ c.last_seen | ist }}" class="note">{{ c.last_seen | relative_time }}</td>
       <td>
-        {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.printer_ok else 'Problem' }}"><span class="dot"></span>Unknown</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
+        {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.printer_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
         {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
         {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
         {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
         {% if c.printer_test_ran and not c.devices_unknown %}<div class="note" style="font-size:0.76rem;margin-top:3px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
       </td>
       <td>
-        {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.microatm_ok else 'Problem' }}"><span class="dot"></span>Unknown</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
+        {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.microatm_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
         {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
         {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
         {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}

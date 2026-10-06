@@ -140,7 +140,7 @@ class OfflineCspDeviceStatusTests(RouteTestCase):
     def test_offline_csps_devices_show_unknown_not_a_stale_ok(self):
         html = self.client.get("/").get_data(as_text=True)
         row = html.split("Offline Olga")[1].split("</tr>")[0]
-        self.assertIn("Unknown", row)
+        self.assertIn("Disconnected", row)
         # The row's own Status badge is red (Offline), so ANY green badge in
         # it would be a stale "OK" leaking through for the micro-ATM.
         self.assertNotIn("badge-green", row)
@@ -163,7 +163,7 @@ class OfflineCspDeviceStatusTests(RouteTestCase):
 
     def test_detail_page_labels_offline_device_status_as_unknown(self):
         html = self.client.get("/csp/OFF1").get_data(as_text=True)
-        self.assertIn("unknown - CSP offline", html)
+        self.assertIn("disconnected - CSP offline", html)
 
 
 class ApiKeyManagementTests(RouteTestCase):
