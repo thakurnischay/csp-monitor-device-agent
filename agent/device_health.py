@@ -47,8 +47,10 @@ import json
 import subprocess
 import time
 
+import deep_checks
+
 _PS_TIMEOUT = 8
-_CHECK_HARD_TIMEOUT = 18  # overall ceiling for one check() - 3 scans now (printers, usb, all devices)
+_CHECK_HARD_TIMEOUT = 32  # overall ceiling for one check() - 3 scans (printers, usb, all devices) + the GPS data read
 
 # Win32_Printer.PrinterStatus values (Microsoft WMI reference):
 # 1=Other 2=Unknown 3=Idle 4=Printing 5=Warmup 6=Stopped Printing 7=Offline
@@ -696,6 +698,18 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
         gps = {"configured": False, "present": False, "ok": False, "status": "check failed"}
     printer = _apply_software_signal(printer, software)
     microatm = _apply_software_signal(microatm, software)
+    biometric["resolved_name"] = resolved_biometric_name
+    gps["resolved_name"] = resolved_gps_name
+    # Deeper "does it actually work" checks (RD service / NMEA data) - only
+    # ever tighten an otherwise-OK verdict, never raise, see deep_checks.py.
+    try:
+        biometric = deep_checks.apply_biometric_rd_check(biometric)
+    except Exception:
+        pass
+    try:
+        gps = deep_checks.apply_gps_nmea_check(gps)
+    except Exception:
+        pass
     printer["resolved_name"] = resolved_printer_name
     microatm["resolved_name"] = resolved_microatm_name
     biometric["resolved_name"] = resolved_biometric_name
