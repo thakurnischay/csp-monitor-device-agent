@@ -116,6 +116,24 @@ def main():
         w(f"  - {p['name']}   status={p['status']}{flag}{hit}")
     w(f"  Agent's automatic choice: {dh.auto_detect_printer(printers) or '(none - needs a manual pick)'}")
 
+    w()
+    w("  Other devices that could be a passbook printer that Windows has NOT installed")
+    w("  as a printer (USB printing entries, printer-class devices, devices with no driver):")
+    seen_print = {p["name"] for p in printers}
+    found_print = False
+    for d in alld:
+        n = d["name"].lower()
+        if d["name"] in seen_print:
+            continue
+        if (d["class"] in dh._PRINT_CLASSES or "print" in n or d["class"] in ("Unknown", "")
+                or d["status"].upper() in ("ERROR", "UNKNOWN", "DEGRADED")
+                or any(k in dh.search_text(d) for k in dh._KNOWN_PRINTER_BRANDS)):
+            w(row(d, dh._KNOWN_PRINTER_BRANDS))
+            found_print = True
+    if not found_print:
+        w("  (none) - if the passbook printer is plugged in and switched ON, but nothing")
+        w("  above looks like it, Windows cannot see it at all (cable, power or USB port).")
+
     com = [d for d in alld if d["class"] == "Ports"]
     section("5. COM / SERIAL PORTS (passbook printers and GPS dongles often appear here)")
     for d in com:

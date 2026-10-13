@@ -72,6 +72,7 @@ _USB_CLASSES = ("USB", "HIDClass", "Ports", "SmartCardReader", "Biometric")
 # brand is recognized, so it's always offered in the manual dropdown - see
 # list_all_devices()/_check_impl().
 _COM_PORT_CLASSES = ("Ports",)
+_PRINT_CLASSES = ("Printer", "PrintQueue", "USBPrint")
 
 # Printers matching any of these are virtual/software printers (PDF writers,
 # fax, OneNote, or ones injected by remote-access tools like UltraViewer) -
@@ -712,7 +713,12 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
     for d in all_devices:
         if d["name"] in printer_names_seen:
             continue
-        if d["class"] in _COM_PORT_CLASSES or any(kw in d["name"].lower() for kw in _KNOWN_PRINTER_BRANDS):
+        # A passbook printer often is NOT an installed Windows printer: it
+        # can be only a COM port, a bare "USB Printing Support" entry, or
+        # recognisable just by its maker/brand. Offer all of those.
+        if (d["class"] in _COM_PORT_CLASSES or d["class"] in _PRINT_CLASSES
+                or "printing support" in d["name"].lower()
+                or any(kw in search_text(d) for kw in _KNOWN_PRINTER_BRANDS)):
             extra_printer_candidates.append(d)
             printer_names_seen.add(d["name"])
     printers = printers + extra_printer_candidates
