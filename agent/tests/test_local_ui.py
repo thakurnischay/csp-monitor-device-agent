@@ -72,3 +72,14 @@ class LocalUiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_status_carries_a_caption_for_each_dropdown_entry(self):
+        h = _health()
+        h["gps_device_list"] = [{"name": "USB Serial Device (COM5)", "class": "Ports", "ok": True,
+                                 "status": "OK", "manufacturer": "Prolific", "vid": "067B", "pid": "2303",
+                                 "vendor": "Prolific"}]
+        h["gps"] = dict(h["gps"], resolved_name="USB Serial Device (COM5)")
+        with mock.patch.object(self.local_ui.device_health, "check", return_value=h):
+            data = self.client.get("/status").get_json()
+        self.assertEqual(data["device_labels"]["USB Serial Device (COM5)"],
+                         "USB Serial Device (COM5) | Prolific | USB 067B:2303")

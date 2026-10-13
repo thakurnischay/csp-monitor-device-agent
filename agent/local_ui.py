@@ -156,7 +156,7 @@ function functionalNote(id, ft) {
   if (!r.ran) { el.textContent = "Test print (" + ft.date + "): " + (r.detail || "skipped"); return; }
   el.textContent = "Test print (" + ft.date + "): " + (r.ok ? "OK - " : "PROBLEM - ") + (r.detail || "");
 }
-function fillSelect(inputEl, datalistEl, options, current) {
+function fillSelect(inputEl, datalistEl, options, current, labels) {
   // A plain <input list="..."> combo box, not a rigid <select>: shows
   // whatever the scan found as suggestions, but ALWAYS lets someone type the
   // exact device name directly - essential when the scan can't run at all
@@ -165,6 +165,8 @@ function fillSelect(inputEl, datalistEl, options, current) {
   for (var i = 0; i < (options || []).length; i++) {
     var o = document.createElement("option");
     o.value = options[i];
+    // The caption shown next to the name (maker, USB id, "likely match").
+    if (labels && labels[options[i]]) { o.label = labels[options[i]]; }
     datalistEl.appendChild(o);
   }
   // Never overwrite text the person is actively typing.
@@ -188,9 +190,9 @@ function loadStatus() {
     badge("gpsBadge", "gpsDetail", d.gps, "gpsAutoNote", d.config.gps_name);
     functionalNote("printerFunctionalNote", d.printer_functional_test);
     fillSelect(document.getElementById("printerSelect"), document.getElementById("printerOptions"), d.available_printers, d.config.printer_name);
-    fillSelect(document.getElementById("microatmSelect"), document.getElementById("microatmOptions"), d.available_usb_devices, d.config.microatm_name);
-    fillSelect(document.getElementById("biometricSelect"), document.getElementById("biometricOptions"), d.available_biometric_devices, d.config.biometric_name);
-    fillSelect(document.getElementById("gpsSelect"), document.getElementById("gpsOptions"), d.available_gps_devices, d.config.gps_name);
+    fillSelect(document.getElementById("microatmSelect"), document.getElementById("microatmOptions"), d.available_usb_devices, d.config.microatm_name, d.device_labels);
+    fillSelect(document.getElementById("biometricSelect"), document.getElementById("biometricOptions"), d.available_biometric_devices, d.config.biometric_name, d.device_labels);
+    fillSelect(document.getElementById("gpsSelect"), document.getElementById("gpsOptions"), d.available_gps_devices, d.config.gps_name, d.device_labels);
     document.getElementById("serverUrl").value = d.config.server_url || "";
     document.getElementById("cspId").value = d.config.csp_id || "";
     document.getElementById("softwareProcess").value = d.config.software_process || "";
@@ -314,7 +316,19 @@ def status():
                          if d["name"] == current_biometric or not device_health.is_likely_virtual_usb_device(d["name"])]
     gps_devices = [d["name"] for d in health["gps_device_list"]
                    if d["name"] == current_gps or not device_health.is_likely_virtual_usb_device(d["name"])]
+    labels = {}
+    for lst, brands in ((health["usb_device_list"], device_health._KNOWN_MICROATM_BRANDS),
+                        (health["biometric_device_list"], device_health._KNOWN_BIOMETRIC_BRANDS),
+                        (health["gps_device_list"], device_health._KNOWN_GPS_BRANDS)):
+        for d in lst:
+            text = device_health.device_label(d)
+            if device_health.is_recognised(d, brands):
+                text = "likely match | " + text
+            # the same device can sit in two lists; keep the "likely" caption
+            if d["name"] not in labels or text.startswith("likely"):
+                labels[d["name"]] = text
     return jsonify({
+        "device_labels": labels,
         "printer": health["printer"],
         "microatm": health["microatm"],
         "biometric": health["biometric"],

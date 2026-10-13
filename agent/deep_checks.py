@@ -117,26 +117,66 @@ def probe_rd_services() -> list:
     return [r for r in results if r]
 
 
+_UNVERIFIED = (" [not verified - Windows says it is plugged in with a working driver, but "
+               "this could not be confirmed as the right {what}; check the selection]")
+
+
+def _unverified(out: dict, what: str) -> dict:
+    """The device was picked by hand and nothing could confirm it really is
+    that kind of device, so "OK" only means "plugged in, driver fine"."""
+    if out.get("ok") and out.get("configured") and out.get("present")             and not out.get("recognised") and not out.get("verified"):
+        out = dict(out)
+        out["status"] = out["status"] + _UNVERIFIED.format(what=what)
+        out["verified"] = False
+    return out
+
+
+def _rd_name(service: dict) -> str:
+    return service.get("info") or "fingerprint scanner (RD service)"
+
+
 def apply_biometric_rd_check(bio: dict) -> dict:
-    """Fold the RD-service state into the biometric verdict (see module doc)."""
+    """Fold the RD-service state into the biometric verdict (see module doc).
+
+    The RD service is the best evidence there is: it names the scanner's real
+    brand AND says whether the scanner is usable, whatever generic name
+    Windows gave the USB entry. So:
+      - nothing (valid) picked in the dropdown + an RD service answers  ->
+        the scanner is reported straight from the RD service, no manual pick;
+      - a pick that is present + OK + RD READY  -> "confirmed";
+      - RD says NOTREADY / has vanished         -> problem;
+      - no RD service at all and an unrecognised pick -> flagged "not verified".
+    """
     global _rd_seen
-    if not (bio.get("configured") and bio.get("present") and bio.get("ok")):
-        return bio
+    if bio.get("configured") and bio.get("present") and not bio.get("ok"):
+        return bio          # Windows already reports a driver problem
     try:
         services, _ = _cached("rd", probe_rd_services)
     except Exception:
-        return bio
+        return _unverified(bio, "fingerprint scanner")
     if services:
         with _lock:
             _rd_seen = True
-        not_ready = [s for s in services if s["status"] != "READY"]
-        if len(not_ready) == len(services):
-            s = not_ready[0]
+        ready = [s for s in services if s["status"] == "READY"]
+        if not (bio.get("configured") and bio.get("present")):
+            s = (ready or services)[0]
+            out = {"configured": True, "present": True, "ok": bool(ready),
+                   "verified": True, "source": "rd_service",
+                   "resolved_name": bio.get("resolved_name", "")}
+            out["status"] = (f"OK - {_rd_name(s)} is ready" if ready else
+                             f"{_rd_name(s)} reports NOT READY - the scanner is not ready to use")
+            return out
+        if not ready:
             out = dict(bio)
             out["ok"] = False
             out["status"] = (bio["status"] + " (but its RD service reports "
-                             + s["status"] + " - the scanner is not ready to use)")
+                             + services[0]["status"] + " - the scanner is not ready to use)")
             return out
+        out = dict(bio)
+        out["verified"] = True
+        out["status"] = bio["status"] + f" (confirmed by the RD service: {_rd_name(ready[0])})"
+        return out
+    if not (bio.get("configured") and bio.get("present")):
         return bio
     with _lock:
         seen_before = _rd_seen
@@ -146,7 +186,7 @@ def apply_biometric_rd_check(bio: dict) -> dict:
         out["status"] = (bio["status"] + " (but its RD service is no longer "
                          "responding - restart the scanner's RD service)")
         return out
-    return bio     # no RD service ever seen on this PC: nothing to compare to
+    return _unverified(bio, "fingerprint scanner")
 
 
 # ----------------------------------------------------------------------- GPS
@@ -227,7 +267,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         return gps
     port = com_port_from_name(gps.get("resolved_name") or "")
     if not port:
-        return gps          # not a COM-port dongle: nothing we can read
+        return _unverified(gps, "GPS dongle")   # not a COM-port dongle: nothing we can read
     try:
         (kind, text), fresh = _cached("nmea:" + port, lambda: read_nmea(port))
     except Exception:
@@ -238,6 +278,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
             with _lock:
                 _gps_silent[port] = 0
         info = parse_nmea(text)
+        out["verified"] = True       # it really is streaming GPS data
         if info["fix"]:
             sats = f", {info['satellites']} satellites" if info["satellites"] is not None else ""
             out["status"] = gps["status"] + f" (receiving data, satellite fix{sats})"
@@ -246,7 +287,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         return out
     if kind == "BUSY":
         out["status"] = gps["status"] + " (port in use by another program - data check skipped)"
-        return out
+        return _unverified(out, "GPS dongle")
     if kind == "SILENT":
         with _lock:
             if fresh:     # only a NEW read counts toward "silent twice in a row"
@@ -255,6 +296,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         if count >= _SILENT_CHECKS_BEFORE_PROBLEM:
             out["ok"] = False
             out["status"] = (gps["status"] + " (but it is sending no data - unplug and "
-                             "re-plug the GPS dongle)")
-        return out
-    return gps              # UNKNOWN: probe itself failed, say nothing
+                             "re-plug the GPS dongle, or check this is the right device)")
+            return out
+        return _unverified(out, "GPS dongle")
+    return _unverified(gps, "GPS dongle")   # probe itself failed: no verdict beyond the driver check

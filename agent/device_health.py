@@ -44,6 +44,7 @@ call must degrade to "unknown", never crash the agent.
 """
 import concurrent.futures
 import json
+import re
 import subprocess
 import time
 
@@ -182,7 +183,7 @@ def _best_brand_match(items: list, brand_keywords: tuple):
     the rest are not, that live one is the answer - a real "is it plugged in
     and working" signal, not a guess between two equally-plausible names."""
     matches = [item for item in items
-              if any(kw in item["name"].lower() for kw in brand_keywords)]
+              if any(kw in search_text(item) for kw in brand_keywords)]
     if len(matches) == 1:
         return matches[0]["name"]
     if len(matches) > 1:
@@ -277,6 +278,74 @@ def _as_list(data) -> list:
     return data if isinstance(data, list) else [data]
 
 
+# USB vendor IDs we are CONFIDENT about (a wrong entry would mislabel a real
+# device, so this is deliberately short). Used only to put a human-readable
+# maker next to a generic Windows name like "USB Serial Device (COM5)".
+_USB_VENDORS = {
+    "0403": "FTDI", "067B": "Prolific", "1A86": "QinHeng (CH340)",
+    "10C4": "Silicon Labs", "1546": "u-blox", "079B": "Sagem/Morpho",
+    "1162": "SecuGen",
+}
+_VID_PID = re.compile(r"VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", re.I)
+# Manufacturer values Windows fills in for its own generic drivers - they say
+# nothing about who really made the device.
+_GENERIC_MAKERS = ("microsoft", "generic", "(standard", "compatible usb",
+                   "standard system devices", "windows")
+
+
+def _enrich_device(name: str, raw: dict) -> dict:
+    """One PnP row -> the dict the rest of the module uses, plus the extra
+    identifying detail (maker, USB vendor/product id) the setup page shows so
+    a human can tell which generic-looking entry is which."""
+    status = str(raw.get("Status") or "").strip()
+    maker = str(raw.get("Manufacturer") or "").strip()
+    if not maker or any(g in maker.lower() for g in _GENERIC_MAKERS):
+        maker = ""
+    m = _VID_PID.search(str(raw.get("InstanceId") or ""))
+    vid, pid = (m.group(1).upper(), m.group(2).upper()) if m else ("", "")
+    return {"name": name, "class": str(raw.get("Class") or "").strip(),
+            "ok": status.upper() == "OK", "status": status or "unknown",
+            "manufacturer": maker, "vid": vid, "pid": pid,
+            "vendor": _USB_VENDORS.get(vid, "")}
+
+
+def search_text(d: dict) -> str:
+    """Everything that could name this device's brand, lowercased: Windows
+    often gives a generic name but the right maker."""
+    return " ".join(str(d.get(k) or "") for k in ("name", "manufacturer", "vendor")).lower()
+
+
+def device_label(d: dict) -> str:
+    """Dropdown caption: the name plus whatever identifies it better -
+    maker and USB id - e.g. "USB Serial Device (COM5) | Prolific | USB 067B:2303"."""
+    parts = [d.get("name", "")]
+    maker = d.get("manufacturer") or d.get("vendor") or ""
+    if maker and maker.lower() not in parts[0].lower():
+        parts.append(maker)
+    if d.get("vid"):
+        parts.append(f"USB {d['vid']}:{d.get('pid', '')}")
+    return " | ".join(p for p in parts if p)
+
+
+def rank_devices(devices: list, brands: tuple, preferred_classes: tuple = ()) -> list:
+    """Most-likely-first ordering for a dropdown: recognised brand, then the
+    device classes this kind of hardware normally uses, then everything else
+    (alphabetical). Nothing is hidden - only reordered."""
+    def key(d):
+        if any(kw in search_text(d) for kw in brands):
+            rank = 0
+        elif d.get("class") in preferred_classes:
+            rank = 1 + preferred_classes.index(d["class"])   # earlier class = likelier
+        else:
+            rank = 1 + len(preferred_classes)
+        return (rank, d.get("name", "").lower())
+    return sorted(devices, key=key)
+
+
+def is_recognised(d: dict, brands: tuple) -> bool:
+    return bool(d) and any(kw in search_text(d) for kw in brands)
+
+
 def list_printers() -> list:
     """Every printer Windows currently knows about (installed, not necessarily
     powered on). [{"name", "ok", "status"}] — best-effort, never raises."""
@@ -306,7 +375,7 @@ def list_usb_devices() -> list:
     data = _run_ps(
         "Get-PnpDevice -PresentOnly | "
         f"Where-Object {{ $_.Class -in @({class_filter}) }} | "
-        "Select-Object FriendlyName, Status | ConvertTo-Json -Compress")
+        "Select-Object FriendlyName, Class, Status, Manufacturer, InstanceId | ConvertTo-Json -Compress")
     out = []
     for d in _as_list(data):
         if not isinstance(d, dict):
@@ -314,8 +383,7 @@ def list_usb_devices() -> list:
         name = str(d.get("FriendlyName") or "").strip()
         if not name:
             continue
-        status = str(d.get("Status") or "").strip()
-        out.append({"name": name, "ok": status.upper() == "OK", "status": status or "unknown"})
+        out.append(_enrich_device(name, d))
     return out
 
 
@@ -331,7 +399,7 @@ def list_all_devices() -> list:
     is. [{"name", "class", "ok", "status"}] — best-effort, never raises."""
     data = _run_ps(
         "Get-PnpDevice -PresentOnly | "
-        "Select-Object FriendlyName, Class, Status | ConvertTo-Json -Compress")
+        "Select-Object FriendlyName, Class, Status, Manufacturer, InstanceId | ConvertTo-Json -Compress")
     out = []
     for d in _as_list(data):
         if not isinstance(d, dict):
@@ -339,9 +407,7 @@ def list_all_devices() -> list:
         name = str(d.get("FriendlyName") or "").strip()
         if not name:
             continue
-        status = str(d.get("Status") or "").strip()
-        out.append({"name": name, "class": str(d.get("Class") or "").strip(),
-                    "ok": status.upper() == "OK", "status": status or "unknown"})
+        out.append(_enrich_device(name, d))
     return out
 
 
@@ -466,13 +532,17 @@ def resolve_gps(manual_name: str, devices: list = None) -> str:
         return (manual_name or "").strip()
 
 
-def _device_status(configured_name: str, devices: list, not_found: str) -> dict:
+def _device_status(configured_name: str, devices: list, not_found: str, brands: tuple = ()) -> dict:
     configured_name = (configured_name or "").strip()
     if not configured_name:
         return {"configured": False, "present": False, "ok": False, "status": "not configured"}
     match = _find_by_name_or_prefix(configured_name, devices)
     if match:
-        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"]}
+        # `recognised`: the picked device really looks like this kind of
+        # hardware (brand/maker match). A pick that does not is only a
+        # driver-level "plugged in" - deep_checks.py says so on the status.
+        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"],
+                "recognised": is_recognised(match, brands)}
     return {"configured": True, "present": False, "ok": False, "status": not_found}
 
 
@@ -482,14 +552,16 @@ def biometric_status(configured_name: str, devices: list = None) -> dict:
     raises."""
     devices = list_usb_devices() if devices is None else devices
     return _device_status(configured_name, devices,
-                          "not found — check the fingerprint scanner is plugged in")
+                          "not found — check the fingerprint scanner is plugged in",
+                          _KNOWN_BIOMETRIC_BRANDS)
 
 
 def gps_status(configured_name: str, devices: list = None) -> dict:
     """Connectivity health of the CSP's GPS dongle. Never raises."""
     devices = list_usb_devices() if devices is None else devices
     return _device_status(configured_name, devices,
-                          "not found — check the GPS dongle is plugged in")
+                          "not found — check the GPS dongle is plugged in",
+                          _KNOWN_GPS_BRANDS)
 
 
 def printer_functional_test(printer_name: str, wait_seconds: int = 6) -> dict:
@@ -660,7 +732,7 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
     bio_devices = list(usb_devices)
     bio_seen = {d["name"] for d in bio_devices}
     for d in all_devices:
-        if d["name"] not in bio_seen and any(kw in d["name"].lower() for kw in _KNOWN_BIOMETRIC_BRANDS):
+        if d["name"] not in bio_seen and any(kw in search_text(d) for kw in _KNOWN_BIOMETRIC_BRANDS):
             bio_devices.append(d)
             bio_seen.add(d["name"])
     gps_devices = list(usb_devices)
@@ -668,10 +740,12 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
     for d in all_devices:
         if d["name"] in gps_seen:
             continue
-        if d["class"] in _GPS_CANDIDATE_CLASSES or any(kw in d["name"].lower() for kw in _KNOWN_GPS_BRANDS):
+        if d["class"] in _GPS_CANDIDATE_CLASSES or any(kw in search_text(d) for kw in _KNOWN_GPS_BRANDS):
             gps_devices.append(d)
             gps_seen.add(d["name"])
 
+    bio_devices = rank_devices(bio_devices, _KNOWN_BIOMETRIC_BRANDS, ("Biometric", "HIDClass"))
+    gps_devices = rank_devices(gps_devices, _KNOWN_GPS_BRANDS, _GPS_CANDIDATE_CLASSES)
     resolved_printer_name = resolve_printer(printer_name, printers)
     resolved_microatm_name = resolve_microatm(microatm_name, usb_devices)
     resolved_biometric_name = resolve_biometric(biometric_name, bio_devices)
