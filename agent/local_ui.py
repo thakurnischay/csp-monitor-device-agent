@@ -39,12 +39,14 @@ PAGE = """
 <p>Reports passbook-printer and micro-ATM connectivity to the central dashboard every few minutes.</p>
 
 <div class="card">
+  <div id="scanBanner" style="display:none;background:#fdecea;color:#8a1c14;border:1px solid #f5c2bd;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:0.9rem"></div>
   <div class="row"><span><strong>Passbook printer</strong></span><span id="printerBadge" class="badge off">checking...</span></div>
   <div id="printerDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
   <div id="printerAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <div id="printerFunctionalNote" style="color:#555;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which printer is it?</label>
   <div style="color:#666;font-size:0.82rem;margin-bottom:4px">The agent fills this in automatically when it recognizes a known printer brand - checking both installed Windows printers and USB/serial (COM port) devices, since many passbook printers connect that way instead. If it can't recognize the brand, every real printer and serial device it finds is offered below to pick from - and if the scan itself can't run at all (e.g. blocked by antivirus/Smart App Control), you can type the exact device name here yourself instead. Leave it blank if this PC has no physical passbook printer. Once a day it also sends a real test page to catch things like out-of-paper or a paper jam.</div>
+  <select id="printerPick" onchange="pickDevice('printer')" style="width:100%;margin-bottom:6px"></select>
   <input id="printerSelect" list="printerOptions" placeholder="Pick from the list, or type the exact device name">
   <datalist id="printerOptions"></datalist>
 
@@ -53,6 +55,7 @@ PAGE = """
   <div id="microatmAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which USB device is it?</label>
   <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Also filled in automatically for known micro-ATM brands. If it can't recognize your device, pick from the list, or type the exact device name yourself if the scan can't run at all. Leave it blank if this PC has no micro-ATM.</div>
+  <select id="microatmPick" onchange="pickDevice('microatm')" style="width:100%;margin-bottom:6px"></select>
   <input id="microatmSelect" list="microatmOptions" placeholder="Pick from the list, or type the exact device name">
   <datalist id="microatmOptions"></datalist>
 
@@ -61,6 +64,7 @@ PAGE = """
   <div id="biometricAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which USB device is it?</label>
   <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Filled in automatically for known fingerprint-scanner brands (Mantra, Morpho, SecuGen, Startek and others). If it can't recognize yours, pick from the list, or type the exact device name. Leave it blank if this PC has no fingerprint scanner.</div>
+  <select id="biometricPick" onchange="pickDevice('biometric')" style="width:100%;margin-bottom:6px"></select>
   <input id="biometricSelect" list="biometricOptions" placeholder="Pick from the list, or type the exact device name">
   <datalist id="biometricOptions"></datalist>
 
@@ -69,6 +73,7 @@ PAGE = """
   <div id="gpsAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which device is it?</label>
   <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Filled in automatically when the dongle's name says GPS/GNSS (u-blox, G-Mouse and similar). Many dongles only show up as a generic "USB-SERIAL ... (COM3)" device - if so, pick it from the list yourself. Leave it blank if this PC has no GPS dongle.</div>
+  <select id="gpsPick" onchange="pickDevice('gps')" style="width:100%;margin-bottom:6px"></select>
   <input id="gpsSelect" list="gpsOptions" placeholder="Pick from the list, or type the exact device name">
   <datalist id="gpsOptions"></datalist>
 
@@ -169,10 +174,34 @@ function fillSelect(inputEl, datalistEl, options, current, labels) {
     if (labels && labels[options[i]]) { o.label = labels[options[i]]; }
     datalistEl.appendChild(o);
   }
+  // A normal, clearly-visible drop-down next to the type-in box: a datalist
+  // gives no visible arrow in some browsers, so people could not tell a
+  // list existed at all. Choosing here fills the box below.
+  var pick = document.getElementById(inputEl.id.replace("Select", "Pick"));
+  if (pick) {
+    pick.innerHTML = "";
+    var first = document.createElement("option");
+    first.value = "";
+    first.textContent = (options && options.length)
+      ? "Click here to choose from the " + options.length + " devices found on this PC..."
+      : "No devices found by the scan - type the device name in the box below";
+    pick.appendChild(first);
+    for (var j = 0; j < (options || []).length; j++) {
+      var po = document.createElement("option");
+      po.value = options[j];
+      po.textContent = (labels && labels[options[j]]) ? labels[options[j]] : options[j];
+      if (options[j] === current) { po.selected = true; first.selected = false; }
+      pick.appendChild(po);
+    }
+  }
   // Never overwrite text the person is actively typing.
   if (document.activeElement !== inputEl) {
     inputEl.value = current || "";
   }
+}
+function pickDevice(prefix) {
+  var pick = document.getElementById(prefix + "Pick");
+  if (pick && pick.value) { document.getElementById(prefix + "Select").value = pick.value; }
 }
 function loadStatus() {
   var slowTimer = setTimeout(function () {
@@ -184,12 +213,15 @@ function loadStatus() {
   xhrJson("GET", "/status", null, function (d) {
     clearTimeout(slowTimer);
     if (!d) { document.getElementById("msg").textContent = "Could not load status from the agent - is it still running?"; return; }
+    var sb2 = document.getElementById("scanBanner");
+    if (d.scan_problem) { sb2.textContent = d.scan_problem; sb2.style.display = "block"; }
+    else { sb2.style.display = "none"; }
     badge("printerBadge", "printerDetail", d.printer, "printerAutoNote", d.config.printer_name);
     badge("microatmBadge", "microatmDetail", d.microatm, "microatmAutoNote", d.config.microatm_name);
     badge("biometricBadge", "biometricDetail", d.biometric, "biometricAutoNote", d.config.biometric_name);
     badge("gpsBadge", "gpsDetail", d.gps, "gpsAutoNote", d.config.gps_name);
     functionalNote("printerFunctionalNote", d.printer_functional_test);
-    fillSelect(document.getElementById("printerSelect"), document.getElementById("printerOptions"), d.available_printers, d.config.printer_name);
+    fillSelect(document.getElementById("printerSelect"), document.getElementById("printerOptions"), d.available_printers, d.config.printer_name, d.device_labels);
     fillSelect(document.getElementById("microatmSelect"), document.getElementById("microatmOptions"), d.available_usb_devices, d.config.microatm_name, d.device_labels);
     fillSelect(document.getElementById("biometricSelect"), document.getElementById("biometricOptions"), d.available_biometric_devices, d.config.biometric_name, d.device_labels);
     fillSelect(document.getElementById("gpsSelect"), document.getElementById("gpsOptions"), d.available_gps_devices, d.config.gps_name, d.device_labels);
@@ -329,6 +361,7 @@ def status():
                 labels[d["name"]] = text
     return jsonify({
         "device_labels": labels,
+        "scan_problem": health.get("scan_problem", ""),
         "printer": health["printer"],
         "microatm": health["microatm"],
         "biometric": health["biometric"],

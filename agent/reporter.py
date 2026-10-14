@@ -31,7 +31,9 @@ _RETRY_DELAY_SECONDS = 2   # short - a persistent outage still waits for the
                           # normal interval, this only smooths over a blip
 
 
-def _maybe_run_printer_functional_test(cfg: dict, printer_name: str, printer_present: bool) -> dict:
+def _maybe_run_printer_functional_test(cfg: dict, printer_name: str, printer_present: bool,
+                                       is_windows_printer: bool = True,
+                                       printer_ok: bool = True) -> dict:
     """The real test-print check (device_health.printer_functional_test) costs
     one physical sheet, so it runs at most once per calendar day no matter how
     often report_once() is called — the 5-minute heartbeat, or a manual
@@ -39,6 +41,23 @@ def _maybe_run_printer_functional_test(cfg: dict, printer_name: str, printer_pre
     back the cached result instead of printing again."""
     if not printer_name or not printer_present:
         return {"ran": False, "ok": False, "detail": "no printer configured/connected"}
+    # Windows shows a pop-up error box ("Operation could not be completed
+    # (error 0x00000709)") on the CSP's screen when a test page is sent to a
+    # name that is not a real installed Windows printer - e.g. a COM-port or
+    # USB entry picked as the passbook printer - or to one that is in an error
+    # state. Never send a test page in those cases; the connectivity check
+    # above still reports the device's status.
+    if device_health.is_likely_virtual_printer(printer_name):
+        return {"ran": False, "ok": False,
+                "detail": "test print skipped - this is a software printer (PDF/remote-access/fax), "
+                          "not a physical printer"}
+    if not is_windows_printer:
+        return {"ran": False, "ok": False,
+                "detail": "test print skipped - this is not an installed Windows printer "
+                          "(it is a COM-port or USB device), so a test page cannot be sent to it"}
+    if not printer_ok:
+        return {"ran": False, "ok": False,
+                "detail": "test print skipped - the printer is not ready (offline or in an error state)"}
     today = date.today().isoformat()
     if cfg.get("last_printer_test_date") == today:
         return cfg.get("last_printer_test_result") or {"ran": False, "ok": None, "detail": "already checked today"}
@@ -83,7 +102,9 @@ def build_payload(cfg: dict) -> dict:
     config_store.sync_resolved_device("gps_name", health["gps"].get("resolved_name", ""))
     resolved_printer_name = health["printer"].get("resolved_name") or cfg.get("printer_name", "")
     functional = _maybe_run_printer_functional_test(
-        cfg, resolved_printer_name, health["printer"].get("present", False))
+        cfg, resolved_printer_name, health["printer"].get("present", False),
+        resolved_printer_name in health.get("windows_printer_names", []),
+        health["printer"].get("ok", False))
     return {
         "schema_version": SCHEMA_VERSION,
         "agent_version": AGENT_VERSION,

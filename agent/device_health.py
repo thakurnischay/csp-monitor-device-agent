@@ -50,8 +50,8 @@ import time
 
 import deep_checks
 
-_PS_TIMEOUT = 8
-_CHECK_HARD_TIMEOUT = 32  # overall ceiling for one check() - 3 scans (printers, usb, all devices) + the GPS data read
+_PS_TIMEOUT = 30           # one Windows scan; a weak CSP PC can need far more than 8 s
+_CHECK_HARD_TIMEOUT = 75   # overall ceiling for one check(): 3 scans (run in parallel) + the GPS data read
 
 # Win32_Printer.PrinterStatus values (Microsoft WMI reference):
 # 1=Other 2=Unknown 3=Idle 4=Printing 5=Warmup 6=Stopped Printing 7=Offline
@@ -661,14 +661,64 @@ def check(printer_name: str, microatm_name: str, software_process: str = "",
                               biometric_name, gps_name)
     if result is not None:
         return result
+    timed_out_msg = ("The device check did not finish in time - the PC is very slow or a "
+                     "security tool (Smart App Control / antivirus) is blocking it. Wait a "
+                     "minute and refresh; you can still type each device name yourself.")
     timed_out = {"configured": False, "present": False, "ok": False,
                 "status": "scan timed out - a security tool on this PC "
                           "(Smart App Control/antivirus) may be blocking the check"}
     return {"printer": dict(timed_out), "microatm": dict(timed_out),
             "biometric": dict(timed_out), "gps": dict(timed_out),
             "software": {"configured": False, "running": False},
+            "scan_problem": timed_out_msg,
             "printer_list": [], "usb_device_list": [],
             "biometric_device_list": [], "gps_device_list": []}
+
+
+_last_good = {"printers": [], "usb": [], "all": []}
+
+
+def _scan_everything():
+    """The three Windows scans, run IN PARALLEL (each is mostly PowerShell
+    start-up time, so on a slow PC this is ~3x faster than one after another).
+
+    Returns (printers, usb_devices, all_devices, problem). A scan that returns
+    nothing is NOT the same as "no devices": Windows always has dozens of
+    devices, so an empty device list means the scan was blocked, timed out or
+    failed. In that case the last good list is reused (if any) and `problem`
+    says so, so the setup page can tell the person instead of silently showing
+    an empty dropdown."""
+    out = {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+    futures = {"printers": pool.submit(list_printers),
+               "usb": pool.submit(list_usb_devices),
+               "all": pool.submit(list_all_devices)}
+    for key, fut in futures.items():
+        try:
+            out[key] = fut.result()
+        except Exception:
+            out[key] = []
+    pool.shutdown(wait=False)   # never block on a stuck scan thread
+    problem = ""
+    # The full device list is the canary: Windows always has dozens of
+    # devices, so an empty one means the scan itself failed (timed out,
+    # blocked, PowerShell restricted). Printers/USB lists can legitimately be
+    # short or empty, so they are only restored when the WHOLE scan failed.
+    if not out["all"]:
+        if _last_good["all"]:
+            for key in ("printers", "usb", "all"):
+                out[key] = list(_last_good[key])
+            problem = ("The latest Windows device scan did not answer in time, so the "
+                       "last successful list is being shown. The PC may be slow or busy.")
+        else:
+            problem = ("Windows did not return the list of connected devices (the scan "
+                       "timed out, failed, or is blocked by antivirus / Smart App Control). "
+                       "Wait a minute and refresh. If this stays, run DIAGNOSE.bat and send "
+                       "the file to your admin. You can still type each device name yourself.")
+    else:
+        for key in ("printers", "usb", "all"):
+            _last_good[key] = list(out[key])
+    return out["printers"], out["usb"], out["all"], problem
 
 
 def _check_impl(printer_name: str, microatm_name: str, software_process: str = "",
@@ -695,20 +745,10 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
     recognition and the manual dropdown both work for hardware that attaches
     through a vendor's own USB/serial driver, not just a proper Windows
     printer queue."""
-    try:
-        printers = list_printers()
-    except Exception:
-        printers = []
-    try:
-        usb_devices = list_usb_devices()
-    except Exception:
-        usb_devices = []
-    try:
-        all_devices = list_all_devices()
-    except Exception:
-        all_devices = []
+    printers, usb_devices, all_devices, scan_problem = _scan_everything()
 
     printer_names_seen = {p["name"] for p in printers}
+    windows_printer_names = sorted(printer_names_seen)   # real installed printers only
     extra_printer_candidates = []
     for d in all_devices:
         if d["name"] in printer_names_seen:
@@ -796,5 +836,7 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
     gps["resolved_name"] = resolved_gps_name
     return {"printer": printer, "microatm": microatm,
             "biometric": biometric, "gps": gps, "software": software,
+            "scan_problem": scan_problem,
+            "windows_printer_names": windows_printer_names,
             "printer_list": printers, "usb_device_list": usb_devices,
             "biometric_device_list": bio_devices, "gps_device_list": gps_devices}

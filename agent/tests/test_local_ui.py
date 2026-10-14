@@ -83,3 +83,18 @@ if __name__ == "__main__":
             data = self.client.get("/status").get_json()
         self.assertEqual(data["device_labels"]["USB Serial Device (COM5)"],
                          "USB Serial Device (COM5) | Prolific | USB 067B:2303")
+
+    def test_page_has_a_visible_dropdown_for_each_of_the_four_devices(self):
+        html = self.client.get("/").get_data(as_text=True)
+        for prefix in ("printer", "microatm", "biometric", "gps"):
+            self.assertIn('id="%sPick"' % prefix, html)
+            self.assertIn("pickDevice('%s')" % prefix, html)
+        self.assertIn("scanBanner", html)
+
+    def test_status_passes_on_a_scan_problem_so_the_page_can_show_it(self):
+        h = _health()
+        h["scan_problem"] = "Windows did not return the list of connected devices"
+        with mock.patch.object(self.local_ui.device_health, "check", return_value=h):
+            data = self.client.get("/status").get_json()
+        self.assertIn("did not return", data["scan_problem"])
+

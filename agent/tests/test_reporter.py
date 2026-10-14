@@ -63,6 +63,8 @@ class BoundedRetryTests(unittest.TestCase):
         for p in self._hw_patches:
             p.start()
             self.addCleanup(p.stop)
+        for k in device_health._last_good:      # no devices leaked in from other tests
+            device_health._last_good[k] = []
 
     def test_retries_exactly_once_on_persistent_connection_failure(self):
         call_count = {"n": 0}
@@ -156,6 +158,44 @@ class FunctionalTestGatingTests(unittest.TestCase):
             result = self.reporter._maybe_run_printer_functional_test(self.config_store.load(), "TVS RP3200", False)
         test_mock.assert_not_called()
         self.assertFalse(result["ran"])
+
+    def test_never_sends_a_test_page_to_a_com_port_or_usb_entry(self):
+        """Windows pops an error box (0x00000709) on the CSP's screen if a test
+        page is sent to a name that is not an installed Windows printer."""
+        with mock.patch.object(self.reporter.device_health, "printer_functional_test") as test_mock:
+            result = self.reporter._maybe_run_printer_functional_test(
+                self.config_store.load(), "USB-SERIAL CH340 (COM3)", True, is_windows_printer=False)
+        test_mock.assert_not_called()
+        self.assertFalse(result["ran"])
+        self.assertIn("not an installed Windows printer", result["detail"])
+
+    def test_never_sends_a_test_page_to_a_software_printer(self):
+        """A PC with no real printer: PDF / AnyDesk / OneNote etc. always look
+        present and ready, and printing to them pops dialogs on the screen."""
+        for name in ("Microsoft Print to PDF", "AnyDesk Printer", "RustDesk Printer",
+                     "OneNote (Desktop)", "Fax"):
+            with mock.patch.object(self.reporter.device_health, "printer_functional_test") as test_mock:
+                result = self.reporter._maybe_run_printer_functional_test(
+                    self.config_store.load(), name, True, True, True)
+            test_mock.assert_not_called()
+            self.assertFalse(result["ran"], name)
+            self.assertIn("software printer", result["detail"])
+
+    def test_never_sends_a_test_page_to_a_printer_in_an_error_state(self):
+        with mock.patch.object(self.reporter.device_health, "printer_functional_test") as test_mock:
+            result = self.reporter._maybe_run_printer_functional_test(
+                self.config_store.load(), "TVS RP3200", True, True, printer_ok=False)
+        test_mock.assert_not_called()
+        self.assertIn("not ready", result["detail"])
+
+    def test_the_skip_is_not_cached_so_a_later_good_state_still_gets_its_daily_test(self):
+        with mock.patch.object(self.reporter.device_health, "printer_functional_test",
+                               return_value={"ran": True, "ok": True, "detail": "x"}) as test_mock:
+            self.reporter._maybe_run_printer_functional_test(
+                self.config_store.load(), "TVS RP3200", True, True, printer_ok=False)
+            self.reporter._maybe_run_printer_functional_test(
+                self.config_store.load(), "TVS RP3200", True, True, printer_ok=True)
+        self.assertEqual(test_mock.call_count, 1)
 
 
 if __name__ == "__main__":

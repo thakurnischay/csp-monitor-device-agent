@@ -73,10 +73,29 @@ if errorlevel 1 (
 )
 
 echo Installing required packages...
-"!PYEXE!" -m pip install --quiet --disable-pip-version-check -r "%~dp0requirements.txt"
-if errorlevel 1 (
+set "PIPOK="
+REM 1) Offline first: the packages are bundled in the "wheels" folder next to
+REM    this file, so a slow or unreliable internet connection cannot break setup.
+if exist "%~dp0wheels" (
+    "!PYEXE!" -m pip install --quiet --disable-pip-version-check --no-index --find-links "%~dp0wheels" -r "%~dp0requirements.txt"
+    if not errorlevel 1 set "PIPOK=1"
+)
+REM 2) Fallback: download them, patiently (long timeout, many retries, 4 tries).
+if not defined PIPOK (
+    echo Downloading the packages - on a slow connection this can take a few minutes. Please wait...
+    for %%N in (1 2 3 4) do (
+        if not defined PIPOK (
+            "!PYEXE!" -m pip install --quiet --disable-pip-version-check --default-timeout=120 --retries 10 -r "%~dp0requirements.txt"
+            if not errorlevel 1 set "PIPOK=1"
+            if not defined PIPOK echo   Attempt %%N did not finish, trying again...
+        )
+    )
+)
+if not defined PIPOK (
     echo.
-    echo Package install failed. Check your internet connection and try again.
+    echo Package install failed - the internet connection is too slow or is blocked.
+    echo Please try again in a few minutes, or ask your admin for the full setup
+    echo folder that includes the "wheels" folder, then run SETUP.bat again.
     pause
     exit /b 1
 )

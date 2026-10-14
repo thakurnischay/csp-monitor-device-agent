@@ -325,5 +325,48 @@ class FunctionalTestTests(unittest.TestCase):
         self.assertTrue(result["ok"])
 
 
+class ScanFailureVisibilityTests(unittest.TestCase):
+    """An empty dropdown used to be silent. A failed Windows scan must be
+    reported, and a previously good list reused instead of going blank."""
+
+    def setUp(self):
+        self._reset()
+        # the last-good cache is module-level state; never leak a fake device
+        # list into later tests (it once triggered a real test print)
+        self.addCleanup(self._reset)
+
+    @staticmethod
+    def _reset():
+        for k in dh._last_good:
+            dh._last_good[k] = []
+
+    def _check(self, printers, usb, alld):
+        with mock.patch.object(dh, "list_printers", return_value=printers),                 mock.patch.object(dh, "list_usb_devices", return_value=usb),                 mock.patch.object(dh, "list_all_devices", return_value=alld),                 mock.patch.object(dh, "process_running", return_value={"configured": False, "running": False}):
+            return dh.check("", "", "")
+
+    def test_a_failed_device_scan_is_reported_not_silent(self):
+        r = self._check([], [], [])
+        self.assertIn("did not return the list of connected devices", r["scan_problem"])
+
+    def test_a_good_scan_has_no_problem(self):
+        dev = {"name": "Mantra MFS100", "class": "USB", "ok": True, "status": "OK"}
+        r = self._check([], [dev], [dev])
+        self.assertEqual(r["scan_problem"], "")
+
+    def test_after_a_good_scan_a_later_failed_one_reuses_the_last_good_list(self):
+        dev = {"name": "Mantra MFS100", "class": "USB", "ok": True, "status": "OK"}
+        self._check([], [dev], [dev])
+        r = self._check([], [], [])
+        self.assertIn("last successful list", r["scan_problem"])
+        self.assertIn("Mantra MFS100", [d["name"] for d in r["biometric_device_list"]])
+
+    def test_real_windows_printers_are_told_apart_from_com_port_candidates(self):
+        printer = {"name": "TVS MSP 250", "ok": True, "status": "idle (ready)"}
+        com = {"name": "USB-SERIAL CH340 (COM3)", "class": "Ports", "ok": True, "status": "OK"}
+        r = self._check([printer], [], [com])
+        self.assertEqual(r["windows_printer_names"], ["TVS MSP 250"])
+        self.assertIn("USB-SERIAL CH340 (COM3)", [p["name"] for p in r["printer_list"]])
+
+
 if __name__ == "__main__":
     unittest.main()
