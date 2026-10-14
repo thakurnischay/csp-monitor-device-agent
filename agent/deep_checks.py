@@ -13,10 +13,10 @@ device_health.py.
 
 Design rules (the devices were not available to test on, so these checks are
 deliberately conservative):
-  - They only ever run when the basic check already says present + OK, and
-    they can only make the verdict WORSE for a clearly-diagnosed fault; any
-    uncertainty (port busy, serial read failed, no RD service installed)
-    leaves the existing verdict untouched.
+  - These checks only ever ADD evidence or notes. They NEVER turn a device
+    into a Problem: a status the agent cannot independently prove (RD NOT
+    READY, a silent serial port) has been wrong on real, working hardware.
+    Problems come only from Windows' own facts (missing / driver error).
   - "No satellite fix" is NOT a problem (indoors it's normal) - it is noted
     in the status text only.
   - A silent GPS dongle is NOT a problem (we can only hear common NMEA
@@ -119,16 +119,16 @@ def _rd_name(service: dict) -> str:
 
 
 def apply_biometric_rd_check(bio: dict) -> dict:
-    """Fold the RD-service state into the biometric verdict (see module doc).
+    """Use the scanner's RD service as EVIDENCE of what the device is - never
+    as a reason to call it broken.
 
-    The RD service is the best evidence there is: it names the scanner's real
-    brand AND says whether the scanner is usable, whatever generic name
-    Windows gave the USB entry. So:
-      - nothing (valid) picked in the dropdown + an RD service answers  ->
-        the scanner is reported straight from the RD service, no manual pick;
-      - a pick that is present + OK + RD READY  -> "confirmed";
-      - RD says NOTREADY / has vanished         -> problem;
-      - no RD service at all and an unrecognised pick -> flagged "not verified".
+    READY is strong positive evidence (the scanner is up and usable), so it
+    verifies the device. NOT READY is NOT treated as a fault: some vendors'
+    services (Morpho's, for one) report it until the scanner has been used
+    once, and a real CSP's perfectly working MorphoSmart MSO1300-E3 was shown
+    as a Problem because of it. A status the agent cannot independently prove
+    must never turn a device red; it is noted in the text and nothing more.
+    Only Windows' own facts (device missing / driver error) make a Problem.
     """
     global _rd_seen
     if bio.get("configured") and bio.get("present") and not bio.get("ok"):
@@ -142,34 +142,35 @@ def apply_biometric_rd_check(bio: dict) -> dict:
             _rd_seen = True
         ready = [s for s in services if s["status"] == "READY"]
         if not (bio.get("configured") and bio.get("present")):
+            # nothing valid picked: report from the RD service alone
             s = (ready or services)[0]
-            out = {"configured": True, "present": True, "ok": bool(ready),
-                   "verified": True, "verified_by": "RD service", "source": "rd_service",
+            out = {"configured": True, "present": True, "ok": True,
+                   "verified": bool(ready), "source": "rd_service",
                    "resolved_name": bio.get("resolved_name", "")}
-            out["status"] = (f"OK - {_rd_name(s)} is ready" if ready else
-                             f"{_rd_name(s)} reports NOT READY - the scanner is not ready to use")
+            if ready:
+                out["verified_by"] = "RD service"
+                out["status"] = f"OK - {_rd_name(s)} is ready"
+            else:
+                out["status"] = (f"{_rd_name(s)} is running but reports NOT READY (some scanners say this "
+                                 "until first use) - could not confirm the scanner is connected")
             return out
-        if not ready:
+        out = dict(bio)
+        if ready:
+            out["verified"] = True
+            out["verified_by"] = "RD service"
+            out["status"] = bio["status"] + f" (confirmed by the RD service: {_rd_name(ready[0])})"
+        else:
+            out["status"] = (bio["status"] + f" (its RD service, {_rd_name(services[0])}, reports NOT READY - "
+                             "some scanners report this until first use; not treated as a fault)")
+        return out
+    if bio.get("configured") and bio.get("present"):
+        with _lock:
+            seen_before = _rd_seen
+        if seen_before:
             out = dict(bio)
-            out["ok"] = False
-            out["status"] = (bio["status"] + " (but its RD service reports "
-                             + services[0]["status"] + " - the scanner is not ready to use)")
+            out["status"] = (bio["status"] + " (its RD service is not answering right now - fingerprint "
+                             "capture may need the scanner's RD service started)")
             return out
-        out = dict(bio)
-        out["verified"] = True
-        out["verified_by"] = "RD service"
-        out["status"] = bio["status"] + f" (confirmed by the RD service: {_rd_name(ready[0])})"
-        return out
-    if not (bio.get("configured") and bio.get("present")):
-        return bio
-    with _lock:
-        seen_before = _rd_seen
-    if seen_before:
-        out = dict(bio)
-        out["ok"] = False
-        out["status"] = (bio["status"] + " (but its RD service is no longer "
-                         "responding - restart the scanner's RD service)")
-        return out
     return bio
 
 

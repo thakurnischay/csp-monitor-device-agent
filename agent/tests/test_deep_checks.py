@@ -59,12 +59,56 @@ class BiometricRdCheckTests(unittest.TestCase):
         self.assertIn("Mantra Authentication Vendor Device Service is ready", out["status"])
         self.assertEqual(out["resolved_name"], "")      # never saved as a "device pick"
 
-    def test_nothing_picked_and_a_notready_rd_service_is_a_problem(self):
-        with self._with_services([{"status": "NOTREADY", "info": "Morpho", "port": 11100}]):
+    def test_notready_is_never_a_problem_field_case_morpho_mso1300(self):
+        """A real CSP's perfectly working MorphoSmart MSO1300-E3 was shown as a
+        Problem because its RD service said NOTREADY (Morpho does that until
+        first use). The agent cannot prove a fault from that."""
+        morpho = dict(BIO_OK, resolved_name="MorphoSmart MSO1300-E3")
+        with self._with_services([{"status": "NOTREADY", "info": "Morpho RD Service", "port": 11100}]):
+            out = dc.apply_biometric_rd_check(dict(morpho))
+        self.assertTrue(out["ok"])
+        self.assertIn("not treated as a fault", out["status"])
+        self.assertNotIn("verified", out)          # the known brand verifies it later, not NOTREADY
+
+    def test_nothing_picked_and_a_notready_rd_service_is_unverified_not_a_problem(self):
+        with self._with_services([{"status": "NOTREADY", "info": "Morpho RD Service", "port": 11100}]):
             out = dc.apply_biometric_rd_check(dict(NOTHING_PICKED))
-        self.assertTrue(out["configured"])
-        self.assertFalse(out["ok"])
-        self.assertIn("NOT READY", out["status"])
+        self.assertTrue(out["ok"])
+        self.assertFalse(out["verified"])
+        self.assertIn("could not confirm the scanner is connected", out["status"])
+
+    def test_a_service_that_answered_before_and_now_does_not_is_only_a_note(self):
+        with self._with_services([{"status": "READY", "info": "", "port": 11100}]):
+            dc.apply_biometric_rd_check(dict(BIO_OK))
+        dc._cache.clear()
+        with self._with_services([]):
+            out = dc.apply_biometric_rd_check(dict(BIO_OK))
+        self.assertTrue(out["ok"])
+        self.assertIn("not answering right now", out["status"])
+
+    def test_the_deep_checks_can_never_turn_a_device_into_a_problem(self):
+        """Whatever the RD service or serial port says, ok must not become False."""
+        import itertools
+        service_sets = ([], [{"status": "READY", "info": "x", "port": 1}],
+                        [{"status": "NOTREADY", "info": "x", "port": 1}],
+                        [{"status": "BUSY", "info": "", "port": 1}])
+        for services, picked in itertools.product(service_sets, (BIO_OK, BIO_GENERIC)):
+            for _ in range(3):
+                dc._cache.clear()
+                with self._with_services(services):
+                    out = dc.apply_biometric_rd_check(dict(picked))
+                self.assertTrue(out["ok"], (services, picked))
+        for services in service_sets:              # nothing picked: never red either
+            dc._cache.clear()
+            with self._with_services(services):
+                out = dc.apply_biometric_rd_check(dict(NOTHING_PICKED))
+            if out.get("configured"):
+                self.assertTrue(out["ok"], services)
+        for kind in ("DATA", "SILENT", "BUSY", "UNKNOWN"):
+            for _ in range(5):
+                dc._cache.clear()
+                with mock.patch.object(dc, "read_nmea", return_value=(kind, GGA_FIX if kind == "DATA" else "")):
+                    self.assertTrue(dc.apply_gps_nmea_check(dict(GPS_GENERIC))["ok"], kind)
 
     def test_nothing_picked_and_no_rd_service_stays_not_set_up(self):
         with self._with_services([]):
@@ -86,25 +130,10 @@ class BiometricRdCheckTests(unittest.TestCase):
         with self._with_services([]):
             self.assertEqual(dc.apply_biometric_rd_check(dict(BIO_OK)), BIO_OK)
 
-    def test_notready_service_is_a_problem(self):
-        with self._with_services([{"status": "NOTREADY", "info": "", "port": 11100}]):
-            out = dc.apply_biometric_rd_check(dict(BIO_OK))
-        self.assertFalse(out["ok"])
-        self.assertIn("NOTREADY", out["status"])
-
     def test_one_ready_service_among_several_is_enough(self):
         with self._with_services([{"status": "NOTREADY", "info": "", "port": 11100},
                                   {"status": "READY", "info": "", "port": 11101}]):
             self.assertTrue(dc.apply_biometric_rd_check(dict(BIO_OK))["ok"])
-
-    def test_service_that_answered_before_and_now_vanished_is_a_problem(self):
-        with self._with_services([{"status": "READY", "info": "", "port": 11100}]):
-            dc.apply_biometric_rd_check(dict(BIO_OK))
-        dc._cache.clear()   # let the next check probe again
-        with self._with_services([]):
-            out = dc.apply_biometric_rd_check(dict(BIO_OK))
-        self.assertFalse(out["ok"])
-        self.assertIn("no longer responding", out["status"])
 
     def test_a_windows_driver_problem_is_left_exactly_as_reported(self):
         bio = dict(BIO_OK, ok=False, status="Error")
@@ -232,6 +261,9 @@ class WiredIntoCheckTests(unittest.TestCase):
 
     def setUp(self):
         dc.reset_state()
+        for k in dh._last_good:        # never inherit another test's device list
+            dh._last_good[k] = []
+        self.addCleanup(lambda: [dh._last_good.__setitem__(k, []) for k in dh._last_good])
 
     def _fake_scans(self):
         usb = [{"name": "Mantra MFS100", "ok": True, "status": "OK"},
@@ -240,15 +272,17 @@ class WiredIntoCheckTests(unittest.TestCase):
                 mock.patch.object(dh, "list_usb_devices", return_value=usb),
                 mock.patch.object(dh, "list_all_devices", return_value=[]))
 
-    def test_notready_rd_service_shows_up_in_check(self):
-        p, u, a = self._fake_scans()
-        with p, u, a, mock.patch.object(
-                dc, "probe_rd_services", return_value=[{"status": "NOTREADY", "info": "", "port": 11100}]), \
-                mock.patch.object(dc, "read_nmea", return_value=("DATA", GGA_FIX)):
-            r = dh._check_impl("", "", "", "Mantra MFS100", "u-blox 7 (COM5)")
-        self.assertFalse(r["biometric"]["ok"])
-        self.assertTrue(r["gps"]["ok"])
-        self.assertIn("satellite fix", r["gps"]["status"])
+    def test_a_working_morpho_with_a_notready_rd_service_is_ok_and_verified_end_to_end(self):
+        """The exact field case through check() + apply_verification()."""
+        usb = [{"name": "MorphoSmart MSO1300-E3", "class": "USB", "ok": True, "status": "OK",
+                "manufacturer": "", "vid": "225D", "pid": "000A", "vendor": "", "instance": "USB\X"}]
+        with mock.patch.object(dh, "list_printers", return_value=[]),                 mock.patch.object(dh, "list_usb_devices", return_value=usb),                 mock.patch.object(dh, "list_all_devices", return_value=usb),                 mock.patch.object(dc, "probe_rd_services",
+                                  return_value=[{"status": "NOTREADY", "info": "Morpho", "port": 11100}]):
+            r = dh.check("", "", "", "MorphoSmart MSO1300-E3", "")
+        out = dh.apply_verification(r)["biometric"]
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["verified"])
+        self.assertEqual(out["verified_by"], "known brand")
 
     def test_exceptions_in_deep_checks_do_not_break_check(self):
         p, u, a = self._fake_scans()
