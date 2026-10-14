@@ -189,9 +189,33 @@ class GpsNmeaCheckTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertIn("in use by another program", out["status"])
 
-    def test_a_failed_probe_on_a_recognised_dongle_says_nothing(self):
+    def test_a_failed_probe_says_what_happened_but_changes_no_verdict(self):
         with self._read("UNKNOWN"):
-            self.assertEqual(dc.apply_gps_nmea_check(dict(GPS_OK)), GPS_OK)
+            out = dc.apply_gps_nmea_check(dict(GPS_OK))
+        self.assertTrue(out["ok"])
+        self.assertNotIn("verified", out)
+        self.assertIn("could not open COM5", out["status"])
+
+    def test_the_status_always_explains_why_the_data_check_did_not_confirm(self):
+        for kind, words in (("BUSY", "in use by another program"), ("SILENT", "no data heard"),
+                            ("UNKNOWN", "could not open")):
+            dc._cache.clear()
+            dc._gps_silent.clear()
+            with self._read(kind):
+                out = dc.apply_gps_nmea_check(dict(GPS_GENERIC))
+            self.assertIn(words, out["status"], kind)
+
+    def test_the_serial_read_turns_dtr_and_rts_on_and_tries_the_common_speeds(self):
+        script = dc._nmea_script("COM7")
+        self.assertIn("DtrEnable=$true", script)
+        self.assertIn("RtsEnable=$true", script)
+        for baud in ("9600", "4800", "38400", "115200"):
+            self.assertIn(baud, script)
+
+    def test_debug_serial_reports_a_port_that_cannot_be_opened(self):
+        out = dc.debug_serial("COM99")
+        self.assertIn("COM99", out)
+        self.assertIn("OPEN ERROR", out)
 
     def test_non_com_recognised_dongle_is_left_alone(self):
         gps = dict(GPS_OK, resolved_name="u-blox GNSS Location Sensor")

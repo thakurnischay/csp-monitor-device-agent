@@ -89,9 +89,9 @@ PAGE = """
     Entries such as "USB Input Device" are generic - a keyboard has the same name - so picking one by guess proves nothing,
     and the dashboard will show <b>unverified</b> for it. This test shows exactly which entry belongs to the device:
     <ol style="margin:6px 0 6px 18px;padding:0">
-      <li>Unplug the device (or switch it off) and click <b>Step 1</b>.</li>
+      <li><b>Unplug</b> the device (or switch it off), wait 5 seconds, then click <b>Step 1</b>. (It must be unplugged at this moment, or nothing will appear as new.)</li>
       <li>Plug it back in, wait about 10 seconds, and click <b>Step 2</b>.</li>
-      <li>Click the button that matches what you plugged in. That entry is then confirmed.</li>
+      <li>Click the button that matches what you plugged in. That entry is then confirmed. (Choosing the same entry in the dropdown above and clicking Save also confirms it.)</li>
     </ol>
   </div>
   <button onclick="findStep1()">Step 1 - remember what is connected now</button>
@@ -447,7 +447,7 @@ def status():
     })
 
 
-_snapshot = {"instances": None, "printers": None}
+_snapshot = {"instances": None, "printers": None, "appeared": {}}
 
 
 def _scan_for_find():
@@ -484,6 +484,14 @@ def detect():
     for name in printers:
         if name not in _snapshot["printers"] and not device_health.is_likely_virtual_printer(name):
             appeared.append({"kind": "printer", "name": name, "instance": "", "label": name + " (installed printer)"})
+    # remember what the test found, so choosing one of these entries in a
+    # dropdown (and saving) counts as the same human confirmation as the
+    # buttons. A name that appeared more than once is ambiguous - buttons only.
+    seen, names = {}, {}
+    for a in appeared:
+        names[a["name"]] = names.get(a["name"], 0) + 1
+        seen[a["name"]] = a["instance"]
+    _snapshot["appeared"] = {n: seen[n] for n, count in names.items() if count == 1}
     return jsonify({"ok": True, "appeared": appeared})
 
 
@@ -519,6 +527,13 @@ def configure():
         if k in data and data[k] == "":
             updates[k] = ""
     config_store.save(**updates)
+    # An entry the plug-in test just found, chosen here for a device, is the
+    # same statement as clicking its "This is my ..." button: the person
+    # plugged the device in, this entry appeared, and they assigned it.
+    for dev in ("printer", "microatm", "biometric", "gps"):
+        name = updates.get(dev + "_name")
+        if name and name in _snapshot["appeared"]:
+            config_store.save(**{dev + "_confirmed": name, dev + "_instance": _snapshot["appeared"][name]})
     return jsonify({"ok": True})
 
 

@@ -32,9 +32,9 @@ import time
 
 RD_PORTS = tuple(range(11100, 11121))
 _RD_TIMEOUT = 0.6
-_NMEA_BAUDS = (9600, 4800)      # most USB dongles; BU-353-style ones use 4800
-_NMEA_SECONDS_PER_BAUD = 2.5
-_NMEA_PS_TIMEOUT = 14
+_NMEA_BAUDS = (9600, 4800, 38400, 115200)   # common NMEA speeds, most likely first
+_NMEA_SECONDS_PER_BAUD = 2.0
+_NMEA_PS_TIMEOUT = 25
 _CACHE_SECONDS = 60             # the local status page polls check() often
 _SILENT_CHECKS_BEFORE_PROBLEM = 2
 
@@ -216,6 +216,9 @@ def _nmea_script(port: str) -> str:
         "$ErrorActionPreference='SilentlyContinue';"
         f"foreach($b in @({bauds})){{"
         f"$p=New-Object System.IO.Ports.SerialPort '{port}',$b,'None',8,'one';"
+        # DTR/RTS ON, as every serial terminal does: .NET leaves them off, and
+        # many cheap USB (CH340/PL2303) GPS dongles stay silent until they are on.
+        "$p.DtrEnable=$true;$p.RtsEnable=$true;"
         "try{$p.Open()}catch{"
         "if($_.Exception.Message -match 'denied|in use|being used'){Write-Output 'RESULT:BUSY'}"
         "else{Write-Output 'RESULT:OPENFAIL'};exit};"
@@ -274,7 +277,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
             out["status"] = gps["status"] + " (receiving data, no satellite fix yet - normal indoors)"
         return out
     if kind == "BUSY":
-        out["status"] = gps["status"] + " (port in use by another program - data check skipped)"
+        out["status"] = gps["status"] + " (GPS data check skipped: " + port + " is in use by another program)"
         return out
     if kind == "SILENT":
         with _lock:
@@ -286,5 +289,38 @@ def apply_gps_nmea_check(gps: dict) -> dict:
             out["status"] = (gps["status"] + " (but it is sending no data - unplug and "
                              "re-plug the GPS dongle, or check this is the right device)")
             return out
+        out["status"] = gps["status"] + " (GPS data check: no data heard on " + port + " yet - will re-check)"
         return out
-    return gps              # probe itself failed: no verdict beyond the driver check
+    # the check itself could not run - say so instead of staying silent
+    out["status"] = gps["status"] + " (GPS data check could not open " + port + ")"
+    return out
+
+
+def debug_serial(port: str) -> str:
+    """For the DIAGNOSE tool only: what a serial port actually sends at each
+    common speed (byte count + the first printable characters), so a dongle
+    that does not verify can be understood from real data."""
+    lines = []
+    for baud in _NMEA_BAUDS:
+        script = (
+            "$ErrorActionPreference='Stop';"
+            f"$p=New-Object System.IO.Ports.SerialPort '{port}',{baud},'None',8,'one';"
+            "$p.DtrEnable=$true;$p.RtsEnable=$true;"
+            "try{$p.Open()}catch{Write-Output ('OPEN ERROR: '+$_.Exception.Message);exit};"
+            "$end=(Get-Date).AddSeconds(3);$buf='';"
+            "while((Get-Date) -lt $end){$buf+=$p.ReadExisting();Start-Sleep -Milliseconds 150};"
+            "$p.Close();"
+            "Write-Output ('BYTES: '+$buf.Length);"
+            "Write-Output ($buf.Substring(0,[Math]::Min(160,$buf.Length)) -replace '[^\\x20-\\x7E]','.')")
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, timeout=20,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            text = " | ".join(l.strip() for l in (r.stdout or "").splitlines() if l.strip()) or "(no output)"
+        except Exception as e:
+            text = f"could not run: {e}"
+        lines.append(f"    {port} at {baud} baud: {text}")
+        if text.startswith("OPEN ERROR"):
+            break           # the port itself cannot be opened - other speeds will fail the same way
+    return "\n".join(lines)

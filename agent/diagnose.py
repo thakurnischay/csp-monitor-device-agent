@@ -166,6 +166,25 @@ def main():
         w(row(d, dh._KNOWN_GPS_BRANDS))
     w(f"  Agent's automatic choice: {dh.auto_detect_gps(gps + usb) or '(none)'}")
 
+    section("8b. GPS DONGLE - what the serial port actually sends")
+    cfg_gps = ""
+    try:
+        import config_store
+        cfg_gps = config_store.load().get("gps_name", "")
+    except Exception:
+        pass
+    ports = []
+    for d in alld:
+        port = dc.com_port_from_name(d["name"])
+        if port and (d["name"] == cfg_gps or "serial" in d["name"].lower() or "gps" in d["name"].lower()
+                     or "ch340" in d["name"].lower() or "pl2303" in d["name"].lower()):
+            ports.append((port, d["name"]))
+    if not ports:
+        w("  No USB-serial / GPS-looking COM port is present.")
+    for port, name in ports:
+        w(f"  {name}")
+        w(dc.debug_serial(port))
+
     section("9. EVERY OTHER DEVICE WINDOWS SHOWS (so nothing is hidden from review)")
     shown = {d["name"] for d in usb} | {d["name"] for d in com} | {d["name"] for d in bio} | {d["name"] for d in gps}
     for d in alld:

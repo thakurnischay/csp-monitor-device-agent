@@ -230,6 +230,42 @@ class FindMyDeviceTests(unittest.TestCase):
         self.assertEqual(self.client.post("/confirm", json={"device": "toaster", "name": "x"}).status_code, 400)
         self.assertEqual(self.client.post("/confirm", json={"device": "gps", "name": ""}).status_code, 400)
 
+    def test_choosing_an_entry_the_test_just_found_and_saving_counts_as_confirming_it(self):
+        """The real field flow: Step 1, Step 2, then pick the entry in the dropdown
+        and Save instead of pressing the 'This is my ...' button."""
+        before = [dh._enrich_device("USB Root Hub", {"Status": "OK", "InstanceId": "U\1"})]
+        ch = dh._enrich_device("USB-SERIAL CH340 (COM7)", {"Status": "OK", "Class": "Ports",
+                                                           "Manufacturer": "wch.cn", "InstanceId": "USB\VID_1A86&PID_7523\5"})
+        with self._scan(before):
+            self.client.post("/snapshot")
+        with self._scan(before + [ch]):
+            self.client.post("/detect")
+        self.client.post("/configure", json={"gps_name": "USB-SERIAL CH340 (COM7)"})
+        import config_store
+        cfg = config_store.load()
+        self.assertEqual(cfg["gps_confirmed"], "USB-SERIAL CH340 (COM7)")
+        self.assertEqual(cfg["gps_instance"], "USB\VID_1A86&PID_7523\5")
+
+    def test_choosing_an_entry_the_test_did_not_find_does_not_confirm_it(self):
+        with self._scan([dh._enrich_device("USB Root Hub", {"Status": "OK", "InstanceId": "U\1"})]):
+            self.client.post("/snapshot")
+            self.client.post("/detect")
+        self.client.post("/configure", json={"gps_name": "USB Input Device"})
+        import config_store
+        self.assertEqual(config_store.load()["gps_confirmed"], "")
+
+    def test_an_ambiguous_same_named_entry_is_not_auto_confirmed(self):
+        a = dh._enrich_device("USB Input Device", {"Status": "OK", "InstanceId": "H\1"})
+        b = dh._enrich_device("USB Input Device", {"Status": "OK", "InstanceId": "H\2"})
+        with self._scan([]), mock.patch.object(self.local_ui, "_scan_for_find", return_value=([dh._enrich_device("X", {"Status": "OK", "InstanceId": "X\1"})], [])):
+            self.client.post("/snapshot")
+        with mock.patch.object(self.local_ui, "_scan_for_find",
+                               return_value=([dh._enrich_device("X", {"Status": "OK", "InstanceId": "X\1"}), a, b], [])):
+            self.client.post("/detect")
+        self.client.post("/configure", json={"biometric_name": "USB Input Device"})
+        import config_store
+        self.assertEqual(config_store.load()["biometric_confirmed"], "")
+
     def test_the_page_has_the_find_my_device_steps(self):
         html = self.client.get("/").get_data(as_text=True)
         for needle in ("findStep1", "findStep2", "confirmDevice", "badge warn", "unverified"):
