@@ -154,34 +154,25 @@ class GpsNmeaCheckTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertIn("no satellite fix yet", out["status"])
 
-    def test_one_silent_read_is_not_enough_to_flag(self):
-        with self._read("SILENT"):
-            self.assertTrue(dc.apply_gps_nmea_check(dict(GPS_OK))["ok"])
+    def test_a_silent_port_is_never_reported_as_a_problem(self):
+        """Real field case: a dongle its owner says works was flagged Problem
+        because this check heard nothing. Silence cannot prove a fault."""
+        for _ in range(5):                       # however many times it is silent
+            dc._cache.clear()
+            with self._read("SILENT"):
+                out = dc.apply_gps_nmea_check(dict(GPS_GENERIC))
+            self.assertTrue(out["ok"])
+            self.assertNotIn("verified", out)    # simply not confirmed by data
+            self.assertIn("could not confirm", out["status"])
+            self.assertNotIn("re-plug", out["status"])
 
-    def test_two_consecutive_silent_reads_flag_a_problem(self):
-        with self._read("SILENT"):
-            dc.apply_gps_nmea_check(dict(GPS_OK))
-            dc._cache.clear()     # next heartbeat = a fresh read
-            out = dc.apply_gps_nmea_check(dict(GPS_OK))
-        self.assertFalse(out["ok"])
-        self.assertIn("sending no data", out["status"])
-
-    def test_cached_repeat_polls_do_not_count_as_extra_silent_reads(self):
-        with self._read("SILENT") as read:
-            for _ in range(5):        # status page polling within the cache window
-                out = dc.apply_gps_nmea_check(dict(GPS_OK))
-        self.assertEqual(read.call_count, 1)
-        self.assertTrue(out["ok"])
-
-    def test_data_resets_the_silent_counter(self):
-        with self._read("SILENT"):
-            dc.apply_gps_nmea_check(dict(GPS_OK))
-        dc._cache.clear()
-        with self._read("DATA", GGA_FIX):
-            dc.apply_gps_nmea_check(dict(GPS_OK))
-        dc._cache.clear()
-        with self._read("SILENT"):
-            self.assertTrue(dc.apply_gps_nmea_check(dict(GPS_OK))["ok"])
+    def test_the_status_always_explains_why_the_data_check_did_not_confirm(self):
+        for kind, words in (("BUSY", "in use by another program"), ("SILENT", "no data heard"),
+                            ("UNKNOWN", "could not open")):
+            dc._cache.clear()
+            with self._read(kind):
+                out = dc.apply_gps_nmea_check(dict(GPS_GENERIC))
+            self.assertIn(words, out["status"], kind)
 
     def test_busy_port_is_ok_with_a_note(self):
         with self._read("BUSY"):
@@ -195,15 +186,6 @@ class GpsNmeaCheckTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertNotIn("verified", out)
         self.assertIn("could not open COM5", out["status"])
-
-    def test_the_status_always_explains_why_the_data_check_did_not_confirm(self):
-        for kind, words in (("BUSY", "in use by another program"), ("SILENT", "no data heard"),
-                            ("UNKNOWN", "could not open")):
-            dc._cache.clear()
-            dc._gps_silent.clear()
-            with self._read(kind):
-                out = dc.apply_gps_nmea_check(dict(GPS_GENERIC))
-            self.assertIn(words, out["status"], kind)
 
     def test_the_serial_read_turns_dtr_and_rts_on_and_tries_the_common_speeds(self):
         script = dc._nmea_script("COM7")
@@ -236,15 +218,6 @@ class GpsNmeaCheckTests(unittest.TestCase):
                 out = dc.apply_gps_nmea_check(dict(GPS_GENERIC))
             self.assertTrue(out["ok"])
             self.assertNotIn("verified", out, kind)
-
-    def test_picking_some_other_com_device_is_caught_because_it_sends_no_gps_data(self):
-        """e.g. the CSP picked the printer's COM port instead of the dongle."""
-        with self._read("SILENT"):
-            dc.apply_gps_nmea_check(dict(GPS_GENERIC))
-            dc._cache.clear()
-            out = dc.apply_gps_nmea_check(dict(GPS_GENERIC))
-        self.assertFalse(out["ok"])
-        self.assertIn("check this is the right device", out["status"])
 
     def test_only_runs_when_the_basic_check_is_already_ok(self):
         with mock.patch.object(dc, "read_nmea") as read:

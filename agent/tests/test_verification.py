@@ -131,6 +131,27 @@ class RealWorldFlowTests(unittest.TestCase):
         self.assertTrue(out["biometric"]["ok"])           # Windows: plugged in, driver fine
         self.assertFalse(out["biometric"]["verified"])    # ...but NOT known to be a scanner
 
+    def test_a_silent_gps_dongle_is_unverified_then_ok_once_identified_never_a_problem(self):
+        """The reported field case: the CSP says the dongle works, but the agent
+        heard no NMEA from it. It must not say Problem."""
+        import deep_checks
+        ch = dh._enrich_device("USB-SERIAL CH340 (COM7)", {"Status": "OK", "Class": "Ports",
+                                                           "Manufacturer": "wch.cn", "InstanceId": "USB\VID_1A86&PID_7523\5"})
+        with mock.patch.object(deep_checks, "read_nmea", return_value=("SILENT", "")):
+            r = self._check([ch], gps_name="USB-SERIAL CH340 (COM7)")
+            for _ in range(3):                                     # repeated checks stay the same
+                deep_checks._cache.clear()
+                r = self._check([ch], gps_name="USB-SERIAL CH340 (COM7)")
+            out = dh.apply_verification(r)["gps"]
+            self.assertTrue(out["ok"])                               # not a Problem
+            self.assertFalse(out["verified"])                        # unverified until identified
+            confirmed = {"gps": {"name": "USB-SERIAL CH340 (COM7)", "instance": "USB\VID_1A86&PID_7523\5"}}
+            deep_checks._cache.clear()
+            r2 = self._check([ch], gps_name="USB-SERIAL CH340 (COM7)", confirmed=confirmed)
+            out2 = dh.apply_verification(r2, confirmed)["gps"]
+        self.assertTrue(out2["ok"] and out2["verified"])
+        self.assertEqual(out2["verified_by"], "plug-in test")
+
     def test_two_entries_with_the_same_generic_name_track_the_confirmed_one(self):
         keyboard = dh._enrich_device("USB Input Device", {"Status": "OK", "Class": "HIDClass", "InstanceId": "HID\\KBD\\1"})
         scanner = dh._enrich_device("USB Input Device", {"Status": "Error", "Class": "HIDClass", "InstanceId": "HID\\SCN\\2"})

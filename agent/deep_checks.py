@@ -19,8 +19,8 @@ deliberately conservative):
     leaves the existing verdict untouched.
   - "No satellite fix" is NOT a problem (indoors it's normal) - it is noted
     in the status text only.
-  - A silent GPS dongle must be silent on TWO consecutive checks before it is
-    flagged, to avoid a false alarm from one slow read.
+  - A silent GPS dongle is NOT a problem (we can only hear common NMEA
+    speeds): it is reported as not confirmed, never as a fault.
   - Never raises, no extra dependency (stdlib + PowerShell's SerialPort).
 """
 import concurrent.futures
@@ -36,11 +36,9 @@ _NMEA_BAUDS = (9600, 4800, 38400, 115200)   # common NMEA speeds, most likely fi
 _NMEA_SECONDS_PER_BAUD = 2.0
 _NMEA_PS_TIMEOUT = 25
 _CACHE_SECONDS = 60             # the local status page polls check() often
-_SILENT_CHECKS_BEFORE_PROBLEM = 2
 
 _lock = threading.Lock()
 _rd_seen = False                # an RD service has answered at least once this run
-_gps_silent = {}                # COM port -> consecutive silent reads
 _cache = {}                     # key -> (timestamp, value)
 
 
@@ -62,7 +60,6 @@ def reset_state():
     global _rd_seen
     with _lock:
         _rd_seen = False
-        _gps_silent.clear()
         _cache.clear()
 
 
@@ -264,9 +261,6 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         return gps
     out = dict(gps)
     if kind == "DATA":
-        if fresh:
-            with _lock:
-                _gps_silent[port] = 0
         info = parse_nmea(text)
         out["verified"] = True       # it really is streaming GPS data
         out["verified_by"] = "GPS data"
@@ -280,16 +274,15 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         out["status"] = gps["status"] + " (GPS data check skipped: " + port + " is in use by another program)"
         return out
     if kind == "SILENT":
-        with _lock:
-            if fresh:     # only a NEW read counts toward "silent twice in a row"
-                _gps_silent[port] = _gps_silent.get(port, 0) + 1
-            count = _gps_silent.get(port, 0)
-        if count >= _SILENT_CHECKS_BEFORE_PROBLEM:
-            out["ok"] = False
-            out["status"] = (gps["status"] + " (but it is sending no data - unplug and "
-                             "re-plug the GPS dongle, or check this is the right device)")
-            return out
-        out["status"] = gps["status"] + " (GPS data check: no data heard on " + port + " yet - will re-check)"
+        # Silence is NOT proof of a fault: this check only knows common NMEA
+        # speeds, and a dongle that works for its owner can still look silent to
+        # it (different protocol/speed, needs the vendor's software to start it).
+        # An unprovable negative must never be reported as a Problem - a real
+        # field CSP's working dongle was wrongly flagged that way. It simply is
+        # not confirmed by data, so it stays unverified unless recognised or
+        # identified by the plug-in test.
+        out["status"] = (gps["status"] + " (GPS data check: no data heard on " + port
+                         + " - this check could not confirm it is sending location data)")
         return out
     # the check itself could not run - say so instead of staying silent
     out["status"] = gps["status"] + " (GPS data check could not open " + port + ")"
