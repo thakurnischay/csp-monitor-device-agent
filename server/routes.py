@@ -10,7 +10,7 @@ from flask import Blueprint, Response, flash, redirect, render_template, request
 
 from db import get_connection
 from device_state import (ONLINE_WINDOW_MIN, NEVER_REPORTED, NOT_REPORTED, OFFLINE, ONLINE, STALE,
-                          UNKNOWN, derive_csp_state, derive_device_state)
+                          UNKNOWN, UNVERIFIED, derive_csp_state, derive_device_state)
 from events import record_audit
 from security import generate_api_key, hash_api_key, key_suffix, login_limiter
 
@@ -83,9 +83,11 @@ def _load_fleet(conn):
         d["state"] = derive_csp_state(r["last_seen"])
         d["online"] = d["state"] == ONLINE
         d["printer_state"] = derive_device_state(
-            r["printer_configured"], r["printer_present"], r["printer_ok"], r["printer_status"])
+            r["printer_configured"], r["printer_present"], r["printer_ok"], r["printer_status"],
+            r["printer_verified"])
         d["microatm_state"] = derive_device_state(
-            r["microatm_configured"], r["microatm_present"], r["microatm_ok"], r["microatm_status"])
+            r["microatm_configured"], r["microatm_present"], r["microatm_ok"], r["microatm_status"],
+            r["microatm_verified"])
         # An offline CSP's device badges are just the LAST value it reported
         # before going dark - not a live reading. Showing them with the same
         # confident OK/Problem styling as a fresh report is misleading, so
@@ -99,7 +101,7 @@ def _load_fleet(conn):
         for dev in ("biometric", "gps"):
             d[dev + "_state"] = derive_device_state(
                 r[dev + "_configured"], r[dev + "_present"], r[dev + "_ok"],
-                r[dev + "_status"]) if d["new_devices_reported"] else NOT_REPORTED
+                r[dev + "_status"], r[dev + "_verified"]) if d["new_devices_reported"] else NOT_REPORTED
         if d["devices_unknown"]:
             d["printer_state"] = UNKNOWN
             d["microatm_state"] = UNKNOWN
@@ -171,6 +173,10 @@ def fleet():
     microatm_problems = sum(1 for c in csps if _device_problem(c, "microatm"))
     biometric_problems = sum(1 for c in csps if _device_problem(c, "biometric"))
     gps_problems = sum(1 for c in csps if _device_problem(c, "gps"))
+    # devices that are plugged in but could not be confirmed to be the right
+    # device - not problems, and not OK either; counted so they cannot hide
+    unverified_devices = sum(1 for c in csps for dev in _DEVICES
+                             if not c["devices_unknown"] and c[dev + "_state"] == UNVERIFIED)
 
     csps = _filter_and_sort(csps, q, status_filter, problems_only, sort, direction)
 
@@ -198,7 +204,8 @@ def fleet():
                           online=online, stale=stale, offline=offline, never_reported=never_reported,
                           window=ONLINE_WINDOW_MIN, printer_problems=printer_problems,
                           microatm_problems=microatm_problems,
-                          biometric_problems=biometric_problems, gps_problems=gps_problems, q=q, status_filter=status_filter,
+                          biometric_problems=biometric_problems, gps_problems=gps_problems,
+                          unverified_devices=unverified_devices, q=q, status_filter=status_filter,
                           problems_only=problems_only, sort=sort, direction=direction,
                           page=page, total_pages=total_pages, refresh=refresh,
                           qs=qs, sort_urls=sort_urls, csv_url=csv_url,
@@ -251,12 +258,14 @@ def csp_detail(csp_id):
     d = dict(c)
     d["state"] = derive_csp_state(c["last_seen"])
     d["online"] = d["state"] == ONLINE
-    d["printer_state"] = derive_device_state(
-        c["printer_configured"], c["printer_present"], c["printer_ok"], c["printer_status"])
-    d["microatm_state"] = derive_device_state(
-        c["microatm_configured"], c["microatm_present"], c["microatm_ok"], c["microatm_status"])
     d["devices_unknown"] = d["state"] == OFFLINE
     d["new_devices_reported"] = (c["schema_version"] or 0) >= 3
+    # Same rule as the fleet table: a plugged-in device whose identity the
+    # agent could not confirm is UNVERIFIED, never a green OK.
+    for dev in _DEVICES:
+        d[dev + "_state"] = derive_device_state(
+            c[dev + "_configured"], c[dev + "_present"], c[dev + "_ok"],
+            c[dev + "_status"], c[dev + "_verified"])
     if label and (label["name"] or "").strip():
         d["name"] = label["name"].strip()
     return render_template("csp_detail.html", c=d, events=events,

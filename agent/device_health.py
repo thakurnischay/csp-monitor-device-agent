@@ -307,7 +307,8 @@ def _enrich_device(name: str, raw: dict) -> dict:
     return {"name": name, "class": str(raw.get("Class") or "").strip(),
             "ok": status.upper() == "OK", "status": status or "unknown",
             "manufacturer": maker, "vid": vid, "pid": pid,
-            "vendor": _USB_VENDORS.get(vid, "")}
+            "vendor": _USB_VENDORS.get(vid, ""),
+            "instance": str(raw.get("InstanceId") or "")}
 
 
 def search_text(d: dict) -> str:
@@ -455,7 +456,8 @@ def printer_status(configured_name: str, printers: list = None) -> dict:
     printers = list_printers() if printers is None else printers
     match = _find_by_name_or_prefix(configured_name, printers)
     if match:
-        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"]}
+        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"],
+                "recognised": is_recognised(match, _KNOWN_PRINTER_BRANDS)}
     return {"configured": True, "present": False, "ok": False,
             "status": "not found — check the printer is connected and installed"}
 
@@ -471,7 +473,8 @@ def microatm_status(configured_name: str, usb_devices: list = None) -> dict:
     usb_devices = list_usb_devices() if usb_devices is None else usb_devices
     match = _find_by_name_or_prefix(configured_name, usb_devices)
     if match:
-        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"]}
+        return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"],
+                "recognised": is_recognised(match, _KNOWN_MICROATM_BRANDS)}
     return {"configured": True, "present": False, "ok": False,
             "status": "not found — check the device is plugged in"}
 
@@ -648,8 +651,64 @@ def _apply_software_signal(hw: dict, software: dict) -> dict:
     return hw
 
 
+_DEVICE_LABELS = {"printer": "passbook printer", "microatm": "micro-ATM",
+                  "biometric": "fingerprint scanner", "gps": "GPS dongle"}
+
+
+def apply_verification(health: dict, confirmed: dict = None, functional: dict = None) -> dict:
+    """Decide, for each of the four devices, whether we actually KNOW it is
+    that kind of device - and say so, so the dashboard never shows a green OK
+    for something that was merely picked from a list.
+
+    "OK" from Windows only means "this entry is plugged in and its driver is
+    fine". A generic entry such as "USB Input Device" is also a keyboard or a
+    mouse, so on its own that proves nothing about a scanner or printer.
+    A device counts as VERIFIED only through real evidence:
+      - the scanner's RD service answered, or the GPS dongle is streaming data;
+      - its name/maker is a known brand of that kind of device;
+      - the person identified it with the plug-in test ("Find my device");
+      - the printer accepted today's test print, or (micro-ATM) the CSP
+        software that drives it is running.
+    Everything else stays UNVERIFIED (verified=False). Only devices that are
+    configured, present and healthy are judged - problems and "not set up"
+    states are left exactly as they are."""
+    confirmed = confirmed or {}
+    functional = functional or {}
+    out = dict(health)
+    windows_printers = set(health.get("windows_printer_names", []))
+    software = health.get("software") or {}
+    for dev in ("printer", "microatm", "biometric", "gps"):
+        d = dict(health[dev])
+        out[dev] = d
+        if not (d.get("configured") and d.get("present") and d.get("ok")):
+            continue
+        name = d.get("resolved_name", "")
+        conf = confirmed.get(dev) or {}
+        by = ""
+        if d.get("verified"):
+            by = d.get("verified_by") or "the device itself"
+        elif conf.get("name") and conf["name"] == name:
+            by = "plug-in test"
+        elif d.get("recognised"):
+            by = "known brand"
+        elif (dev == "printer" and name in windows_printers
+              and not is_likely_virtual_printer(name)
+              and functional.get("ran") and functional.get("ok")):
+            by = "test print"
+        elif dev == "microatm" and software.get("configured") and software.get("running"):
+            by = "CSP software running"
+        d["verified"] = bool(by)
+        d["verified_by"] = by
+        if not by:
+            d["status"] = ("UNVERIFIED - cannot confirm this is the " + _DEVICE_LABELS[dev]
+                           + ". Windows shows the entry as plugged in (driver status: "
+                           + d["status"] + "), but a generic entry could be any device. "
+                           "Pick the right entry, or use 'Find my device' (plug it in and see what appears).")
+    return out
+
+
 def check(printer_name: str, microatm_name: str, software_process: str = "",
-          biometric_name: str = "", gps_name: str = "") -> dict:
+          biometric_name: str = "", gps_name: str = "", confirmed: dict = None) -> dict:
     """Combined snapshot for the reporter loop and the local status page.
     Wrapped in run_with_ceiling() so this ALWAYS returns within
     _CHECK_HARD_TIMEOUT seconds no matter what's blocking underneath (Smart
@@ -658,7 +717,7 @@ def check(printer_name: str, microatm_name: str, software_process: str = "",
     Never raises."""
     result = run_with_ceiling(_check_impl, _CHECK_HARD_TIMEOUT,
                               printer_name, microatm_name, software_process,
-                              biometric_name, gps_name)
+                              biometric_name, gps_name, confirmed)
     if result is not None:
         return result
     timed_out_msg = ("The device check did not finish in time - the PC is very slow or a "
@@ -676,6 +735,29 @@ def check(printer_name: str, microatm_name: str, software_process: str = "",
 
 
 _last_good = {"printers": [], "usb": [], "all": []}
+
+
+def _prefer_confirmed_instance(status: dict, devices: list, resolved_name: str, conf: dict) -> dict:
+    """Generic names ("USB Input Device") are shared by many devices - a
+    keyboard has the same name as a scanner. If the person identified THEIR
+    device with the plug-in test, track that one exact device (by its unique
+    Windows instance id) instead of whichever same-named entry comes first."""
+    try:
+        if not conf or not conf.get("instance") or conf.get("name") != resolved_name:
+            return status
+        for d in devices:
+            if d.get("instance") == conf["instance"]:
+                out = dict(status)
+                out.update({"configured": True, "present": True, "ok": d["ok"], "status": d["status"]})
+                return out
+        # the confirmed device is not connected right now
+        out = dict(status)
+        out.update({"configured": True, "present": False, "ok": False,
+                    "status": "not found - the device you identified is not connected right now"})
+        return out
+    except Exception:
+        return status
+
 
 
 def _scan_everything():
@@ -722,7 +804,7 @@ def _scan_everything():
 
 
 def _check_impl(printer_name: str, microatm_name: str, software_process: str = "",
-                biometric_name: str = "", gps_name: str = "") -> dict:
+                biometric_name: str = "", gps_name: str = "", confirmed: dict = None) -> dict:
     """The actual check() body, run inside run_with_ceiling()'s worker thread.
     The manual printer_name/microatm_name picks are passed through
     resolve_printer/resolve_microatm first, so a wrong or stale manual
@@ -792,10 +874,13 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
 
     bio_devices = rank_devices(bio_devices, _KNOWN_BIOMETRIC_BRANDS, ("Biometric", "HIDClass"))
     gps_devices = rank_devices(gps_devices, _KNOWN_GPS_BRANDS, _GPS_CANDIDATE_CLASSES)
-    resolved_printer_name = resolve_printer(printer_name, printers)
-    resolved_microatm_name = resolve_microatm(microatm_name, usb_devices)
-    resolved_biometric_name = resolve_biometric(biometric_name, bio_devices)
-    resolved_gps_name = resolve_gps(gps_name, gps_devices)
+    def _confirmed_name(dev, resolved):
+        return ((confirmed or {}).get(dev) or {}).get("name") or resolved
+
+    resolved_printer_name = _confirmed_name("printer", resolve_printer(printer_name, printers))
+    resolved_microatm_name = _confirmed_name("microatm", resolve_microatm(microatm_name, usb_devices))
+    resolved_biometric_name = _confirmed_name("biometric", resolve_biometric(biometric_name, bio_devices))
+    resolved_gps_name = _confirmed_name("gps", resolve_gps(gps_name, gps_devices))
     try:
         printer = printer_status(resolved_printer_name, printers)
     except Exception:
@@ -816,6 +901,12 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
         gps = gps_status(resolved_gps_name, gps_devices)
     except Exception:
         gps = {"configured": False, "present": False, "ok": False, "status": "check failed"}
+    microatm = _prefer_confirmed_instance(microatm, usb_devices, resolved_microatm_name,
+                                          (confirmed or {}).get("microatm"))
+    biometric = _prefer_confirmed_instance(biometric, bio_devices, resolved_biometric_name,
+                                           (confirmed or {}).get("biometric"))
+    gps = _prefer_confirmed_instance(gps, gps_devices, resolved_gps_name,
+                                     (confirmed or {}).get("gps"))
     printer = _apply_software_signal(printer, software)
     microatm = _apply_software_signal(microatm, software)
     biometric["resolved_name"] = resolved_biometric_name

@@ -33,6 +33,7 @@ The one endpoint the agent calls. Also usable for manual/scripted testing.
 | `biometric` | object | no | fingerprint scanner, same shape as `printer` (agent `schema_version` 3+). Omitted by older agents - the server then leaves its stored values untouched and the dashboard shows a dash, not "Not set up" |
 | `gps` | object | no | USB GPS dongle, same shape as `printer` (agent `schema_version` 3+), same omission rule as `biometric` |
 | `printer_functional_test` | object | no | `{ran, ok, detail}` |
+| `verified` (inside each of `printer`, `microatm`, `biometric`, `gps`) | bool | no | agent 1.3.1+. `true` = the agent could confirm the device really is that kind of device (RD service answered / GPS data streaming / known brand / identified by the plug-in test / test print accepted). `false` = plugged in with a working driver but identity not confirmed (e.g. a generic "USB Input Device" was picked): the dashboard shows **Unverified** (amber), never OK. Omitted by older agents, which are treated as verified. Optional sibling `verified_by` says how |
 | `schema_version` | int | no | `3` for the current agent (`2` = no biometric/GPS) |
 | `agent_version` | string | no | e.g. `"1.1.0"` |
 | `os` | string | no | e.g. `"Windows-10-10.0.26200-SP0"` |

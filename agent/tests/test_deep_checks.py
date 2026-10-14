@@ -50,7 +50,7 @@ class BiometricRdCheckTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertTrue(out["verified"])
         self.assertIn("confirmed by the RD service: Mantra Authentication", out["status"])
-        self.assertNotIn("not verified", out["status"])
+        self.assertEqual(out["verified_by"], "RD service")
 
     def test_nothing_picked_but_a_ready_rd_service_reports_the_scanner_by_itself(self):
         with self._with_services([{"status": "READY", "info": "Mantra Authentication Vendor Device Service", "port": 11100}]):
@@ -76,12 +76,11 @@ class BiometricRdCheckTests(unittest.TestCase):
         with self._with_services([{"status": "READY", "info": "Mantra", "port": 11100}]):
             self.assertTrue(dc.apply_biometric_rd_check(wrong)["ok"])
 
-    def test_an_unrecognised_pick_with_no_rd_service_is_flagged_not_verified(self):
+    def test_an_unrecognised_pick_with_no_rd_service_is_left_for_the_verification_step(self):
         with self._with_services([]):
             out = dc.apply_biometric_rd_check(dict(BIO_GENERIC))
-        self.assertTrue(out["ok"])                      # driver-level OK stays...
-        self.assertIn("not verified", out["status"])    # ...but is clearly labelled
-        self.assertFalse(out["verified"])
+        self.assertTrue(out["ok"])
+        self.assertNotIn("verified", out)      # apply_verification() decides, not this check
 
     def test_a_recognised_brand_with_no_rd_service_is_not_flagged(self):
         with self._with_services([]):
@@ -206,13 +205,13 @@ class GpsNmeaCheckTests(unittest.TestCase):
         self.assertTrue(out["verified"])
         self.assertNotIn("not verified", out["status"])
 
-    def test_a_generic_pick_that_cannot_be_read_is_flagged_not_verified(self):
+    def test_a_generic_pick_that_cannot_be_read_is_left_for_the_verification_step(self):
         for kind in ("BUSY", "UNKNOWN"):
             dc._cache.clear()
             with self._read(kind):
                 out = dc.apply_gps_nmea_check(dict(GPS_GENERIC))
             self.assertTrue(out["ok"])
-            self.assertIn("not verified", out["status"], kind)
+            self.assertNotIn("verified", out, kind)
 
     def test_picking_some_other_com_device_is_caught_because_it_sends_no_gps_data(self):
         """e.g. the CSP picked the printer's COM port instead of the dongle."""

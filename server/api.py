@@ -36,6 +36,14 @@ def _bool(d, k) -> int:
     return 1 if (isinstance(d, dict) and d.get(k)) else 0
 
 
+def _verified(d):
+    """1/0 when the agent says whether it could confirm the device's identity,
+    None when it does not report that (older agents)."""
+    if isinstance(d, dict) and "verified" in d and d["verified"] is not None:
+        return 1 if d["verified"] else 0
+    return None
+
+
 def _text(d, k, maxlen=160) -> str:
     if not isinstance(d, dict):
         return ""
@@ -163,18 +171,28 @@ def report():
         # row) is treated as transitioning from NOT_CONFIGURED, so an
         # immediately-broken first-ever report still opens an incident right
         # away instead of silently waiting for a second report to notice.
+        # Whether each device's identity could be confirmed (agent >= 1.3.1).
+        # COALESCE: a report that does not carry it never wipes a stored value.
+        conn.execute(
+            "UPDATE csps SET printer_verified=COALESCE(?, printer_verified), "
+            "microatm_verified=COALESCE(?, microatm_verified) WHERE csp_id=?",
+            (_verified(printer), _verified(microatm), csp_id))
         old_printer_state = derive_device_state(
             old["printer_configured"] if old else 0, old["printer_present"] if old else 0,
-            old["printer_ok"] if old else 0, old["printer_status"] if old else "")
+            old["printer_ok"] if old else 0, old["printer_status"] if old else "",
+            old["printer_verified"] if old else None)
         new_printer_state = derive_device_state(
-            _bool(printer, "configured"), new_printer_present, _bool(printer, "ok"), _text(printer, "status"))
+            _bool(printer, "configured"), new_printer_present, _bool(printer, "ok"), _text(printer, "status"),
+            _verified(printer))
         apply_device_transition(conn, csp_id, "printer", old_printer_state, new_printer_state, _text(printer, "status"))
 
         old_microatm_state = derive_device_state(
             old["microatm_configured"] if old else 0, old["microatm_present"] if old else 0,
-            old["microatm_ok"] if old else 0, old["microatm_status"] if old else "")
+            old["microatm_ok"] if old else 0, old["microatm_status"] if old else "",
+            old["microatm_verified"] if old else None)
         new_microatm_state = derive_device_state(
-            _bool(microatm, "configured"), new_microatm_present, _bool(microatm, "ok"), _text(microatm, "status"))
+            _bool(microatm, "configured"), new_microatm_present, _bool(microatm, "ok"), _text(microatm, "status"),
+            _verified(microatm))
         apply_device_transition(conn, csp_id, "microatm", old_microatm_state, new_microatm_state, _text(microatm, "status"))
 
         # Biometric scanner / GPS dongle (agent schema_version 3+). Only
@@ -188,14 +206,16 @@ def report():
                 continue
             conn.execute(
                 f"UPDATE csps SET {dev}_configured=?, {dev}_present=?, {dev}_ok=?, "
-                f"{dev}_status=? WHERE csp_id=?",
+                f"{dev}_status=?, {dev}_verified=COALESCE(?, {dev}_verified) WHERE csp_id=?",
                 (_bool(d, "configured"), _bool(d, "present"), _bool(d, "ok"),
-                 _text(d, "status"), csp_id))
+                 _text(d, "status"), _verified(d), csp_id))
             old_state = derive_device_state(
                 old[f"{dev}_configured"] if old else 0, old[f"{dev}_present"] if old else 0,
-                old[f"{dev}_ok"] if old else 0, old[f"{dev}_status"] if old else "")
+                old[f"{dev}_ok"] if old else 0, old[f"{dev}_status"] if old else "",
+                old[f"{dev}_verified"] if old else None)
             new_state = derive_device_state(
-                _bool(d, "configured"), _bool(d, "present"), _bool(d, "ok"), _text(d, "status"))
+                _bool(d, "configured"), _bool(d, "present"), _bool(d, "ok"), _text(d, "status"),
+                _verified(d))
             apply_device_transition(conn, csp_id, dev, old_state, new_state, _text(d, "status"))
 
         # A test print only "happened" (worth an event) when this report

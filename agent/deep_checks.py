@@ -117,20 +117,6 @@ def probe_rd_services() -> list:
     return [r for r in results if r]
 
 
-_UNVERIFIED = (" [not verified - Windows says it is plugged in with a working driver, but "
-               "this could not be confirmed as the right {what}; check the selection]")
-
-
-def _unverified(out: dict, what: str) -> dict:
-    """The device was picked by hand and nothing could confirm it really is
-    that kind of device, so "OK" only means "plugged in, driver fine"."""
-    if out.get("ok") and out.get("configured") and out.get("present")             and not out.get("recognised") and not out.get("verified"):
-        out = dict(out)
-        out["status"] = out["status"] + _UNVERIFIED.format(what=what)
-        out["verified"] = False
-    return out
-
-
 def _rd_name(service: dict) -> str:
     return service.get("info") or "fingerprint scanner (RD service)"
 
@@ -153,7 +139,7 @@ def apply_biometric_rd_check(bio: dict) -> dict:
     try:
         services, _ = _cached("rd", probe_rd_services)
     except Exception:
-        return _unverified(bio, "fingerprint scanner")
+        return bio
     if services:
         with _lock:
             _rd_seen = True
@@ -161,7 +147,7 @@ def apply_biometric_rd_check(bio: dict) -> dict:
         if not (bio.get("configured") and bio.get("present")):
             s = (ready or services)[0]
             out = {"configured": True, "present": True, "ok": bool(ready),
-                   "verified": True, "source": "rd_service",
+                   "verified": True, "verified_by": "RD service", "source": "rd_service",
                    "resolved_name": bio.get("resolved_name", "")}
             out["status"] = (f"OK - {_rd_name(s)} is ready" if ready else
                              f"{_rd_name(s)} reports NOT READY - the scanner is not ready to use")
@@ -174,6 +160,7 @@ def apply_biometric_rd_check(bio: dict) -> dict:
             return out
         out = dict(bio)
         out["verified"] = True
+        out["verified_by"] = "RD service"
         out["status"] = bio["status"] + f" (confirmed by the RD service: {_rd_name(ready[0])})"
         return out
     if not (bio.get("configured") and bio.get("present")):
@@ -186,7 +173,7 @@ def apply_biometric_rd_check(bio: dict) -> dict:
         out["status"] = (bio["status"] + " (but its RD service is no longer "
                          "responding - restart the scanner's RD service)")
         return out
-    return _unverified(bio, "fingerprint scanner")
+    return bio
 
 
 # ----------------------------------------------------------------------- GPS
@@ -267,7 +254,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         return gps
     port = com_port_from_name(gps.get("resolved_name") or "")
     if not port:
-        return _unverified(gps, "GPS dongle")   # not a COM-port dongle: nothing we can read
+        return gps          # not a COM-port dongle: nothing we can read
     try:
         (kind, text), fresh = _cached("nmea:" + port, lambda: read_nmea(port))
     except Exception:
@@ -279,6 +266,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
                 _gps_silent[port] = 0
         info = parse_nmea(text)
         out["verified"] = True       # it really is streaming GPS data
+        out["verified_by"] = "GPS data"
         if info["fix"]:
             sats = f", {info['satellites']} satellites" if info["satellites"] is not None else ""
             out["status"] = gps["status"] + f" (receiving data, satellite fix{sats})"
@@ -287,7 +275,7 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         return out
     if kind == "BUSY":
         out["status"] = gps["status"] + " (port in use by another program - data check skipped)"
-        return _unverified(out, "GPS dongle")
+        return out
     if kind == "SILENT":
         with _lock:
             if fresh:     # only a NEW read counts toward "silent twice in a row"
@@ -298,5 +286,5 @@ def apply_gps_nmea_check(gps: dict) -> dict:
             out["status"] = (gps["status"] + " (but it is sending no data - unplug and "
                              "re-plug the GPS dongle, or check this is the right device)")
             return out
-        return _unverified(out, "GPS dongle")
-    return _unverified(gps, "GPS dongle")   # probe itself failed: no verdict beyond the driver check
+        return out
+    return gps              # probe itself failed: no verdict beyond the driver check

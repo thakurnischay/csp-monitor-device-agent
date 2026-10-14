@@ -96,6 +96,11 @@ def _migrate_csps_columns(conn):
         "gps_present": "INTEGER NOT NULL DEFAULT 0",
         "gps_ok": "INTEGER NOT NULL DEFAULT 0",
         "gps_status": "TEXT",
+        # NULL = the agent does not report it (older versions); 0/1 = reported
+        "printer_verified": "INTEGER",
+        "microatm_verified": "INTEGER",
+        "biometric_verified": "INTEGER",
+        "gps_verified": "INTEGER",
     }
     for col_name, col_type in new_columns.items():
         if col_name not in existing:

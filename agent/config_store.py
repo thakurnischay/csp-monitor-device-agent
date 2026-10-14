@@ -20,6 +20,12 @@ DEFAULTS = {
     "microatm_name": "",
     "biometric_name": "",
     "gps_name": "",
+    # identity confirmed by the plug-in test ("Find my device"): the entry name
+    # and, where Windows gives one, its unique instance id
+    "printer_confirmed": "", "microatm_confirmed": "",
+    "biometric_confirmed": "", "gps_confirmed": "",
+    "printer_instance": "", "microatm_instance": "",
+    "biometric_instance": "", "gps_instance": "",
     "software_process": "",
     "interval_seconds": 300,
     # Internal state for the once-a-day printer test print (see reporter.py) —
@@ -93,3 +99,11 @@ def sync_resolved_device(field: str, resolved_name: str) -> None:
         save(**{field: resolved_name})
     except Exception:
         pass
+
+
+def confirmed_map(cfg: dict) -> dict:
+    """The devices the person identified with the plug-in test:
+    {"biometric": {"name": ..., "instance": ...}, ...}. Only counts while the
+    saved selection is still that same device (checked by the caller)."""
+    return {d: {"name": cfg.get(d + "_confirmed", ""), "instance": cfg.get(d + "_instance", "")}
+            for d in ("printer", "microatm", "biometric", "gps")}

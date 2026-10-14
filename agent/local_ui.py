@@ -8,6 +8,7 @@ where the CSP:
 Everything else (the actual reporting) runs headless in reporter.py.
 """
 import logging
+from datetime import date
 
 from flask import Flask, jsonify, render_template_string, request
 
@@ -31,7 +32,9 @@ PAGE = """
   input, select { width: 100%; padding: 6px 8px; font-size: 0.95rem; box-sizing: border-box; }
   button { margin-top: 14px; padding: 8px 16px; font-size: 0.95rem; cursor: pointer; }
   .badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.8rem; color: #fff; }
-  .ok { background: #1a7f37; } .bad { background: #c62828; } .off { background: #888; }
+  .ok { background: #1a7f37; } .bad { background: #c62828; } .off { background: #888; } .warn { background: #b26a00; }
+  .found { border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin: 6px 0; font-size: 0.9rem; }
+  .found button { margin-top: 6px; margin-right: 6px; padding: 4px 10px; font-size: 0.82rem; }
   .row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding: 6px 0; }
   #msg { margin-top: 10px; font-size: 0.9rem; }
 </style>
@@ -78,6 +81,22 @@ PAGE = """
   <datalist id="gpsOptions"></datalist>
 
   <button onclick="saveDevices()">Save device selection</button>
+</div>
+
+<div class="card">
+  <div class="row"><span><strong>Not sure which entry is your device? Find it by plugging it in</strong></span></div>
+  <div style="color:#666;font-size:0.85rem;margin:8px 0">
+    Entries such as "USB Input Device" are generic - a keyboard has the same name - so picking one by guess proves nothing,
+    and the dashboard will show <b>unverified</b> for it. This test shows exactly which entry belongs to the device:
+    <ol style="margin:6px 0 6px 18px;padding:0">
+      <li>Unplug the device (or switch it off) and click <b>Step 1</b>.</li>
+      <li>Plug it back in, wait about 10 seconds, and click <b>Step 2</b>.</li>
+      <li>Click the button that matches what you plugged in. That entry is then confirmed.</li>
+    </ol>
+  </div>
+  <button onclick="findStep1()">Step 1 - remember what is connected now</button>
+  <button onclick="findStep2()">Step 2 - what appeared?</button>
+  <div id="findResult" style="margin-top:8px;font-size:0.9rem"></div>
 </div>
 
 <div class="card">
@@ -142,6 +161,7 @@ function xhrJson(method, url, body, onSuccess, onError, timeoutMs) {
 function badge(id, detailId, status, autoNoteId, manualName) {
   var b = document.getElementById(id), d = document.getElementById(detailId);
   if (!status.configured) { b.textContent = "not set up"; b.className = "badge off"; }
+  else if (status.ok && status.verified === false) { b.textContent = "unverified"; b.className = "badge warn"; }
   else if (status.ok) { b.textContent = "OK"; b.className = "badge ok"; }
   else { b.textContent = "problem"; b.className = "badge bad"; }
   d.textContent = status.status || "-";
@@ -198,6 +218,49 @@ function fillSelect(inputEl, datalistEl, options, current, labels) {
   if (document.activeElement !== inputEl) {
     inputEl.value = current || "";
   }
+}
+function findStep1() {
+  var out = document.getElementById("findResult");
+  out.textContent = "Remembering what is connected now - please wait...";
+  xhrJson("POST", "/snapshot", {}, function (d) {
+    out.textContent = (d && d.ok) ? ("Done - " + d.count + " entries remembered. Now plug the device in, wait about 10 seconds, then click Step 2.")
+                                  : "Could not read the device list - try again.";
+  }, function () { out.textContent = "Could not read the device list - is the agent still running?"; }, 60000);
+}
+function findStep2() {
+  var out = document.getElementById("findResult");
+  out.textContent = "Looking for what changed - please wait...";
+  xhrJson("POST", "/detect", {}, function (d) {
+    out.innerHTML = "";
+    if (!d || !d.ok) { out.textContent = (d && d.error) || "Could not read the device list - try again."; return; }
+    if (!d.appeared.length) {
+      out.textContent = "Nothing new appeared. Make sure the device is plugged in and switched on, wait a few more seconds, and click Step 2 again.";
+      return;
+    }
+    var names = [["printer", "passbook printer"], ["microatm", "micro-ATM"], ["biometric", "fingerprint scanner"], ["gps", "GPS dongle"]];
+    for (var i = 0; i < d.appeared.length; i++) {
+      var item = d.appeared[i];
+      var box = document.createElement("div");
+      box.className = "found";
+      box.appendChild(document.createTextNode("Appeared: " + item.label));
+      box.appendChild(document.createElement("br"));
+      for (var j = 0; j < names.length; j++) {
+        (function (it, key, text) {
+          var b = document.createElement("button");
+          b.textContent = "This is my " + text;
+          b.onclick = function () { confirmDevice(key, it); };
+          box.appendChild(b);
+        })(item, names[j][0], names[j][1]);
+      }
+      out.appendChild(box);
+    }
+  }, function () { out.textContent = "Could not read the device list - is the agent still running?"; }, 60000);
+}
+function confirmDevice(key, item) {
+  xhrJson("POST", "/confirm", {device: key, name: item.name, instance: item.instance || ""}, function (d) {
+    document.getElementById("findResult").textContent = (d && d.ok) ? "Saved - this entry is now confirmed as your device." : "Could not save.";
+    loadStatus();
+  }, function () { document.getElementById("findResult").textContent = "Could not save - is the agent still running?"; }, 10000);
 }
 function pickDevice(prefix) {
   var pick = document.getElementById(prefix + "Pick");
@@ -318,7 +381,8 @@ def status():
     cfg = config_store.load()
     health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
                                  cfg.get("software_process", ""),
-                                 cfg.get("biometric_name", ""), cfg.get("gps_name", ""))
+                                 cfg.get("biometric_name", ""), cfg.get("gps_name", ""),
+                                 config_store.confirmed_map(cfg))
     # Self-configure: a confidently-recognized real device gets saved as the
     # actual selection, so the dropdown (and the dashboard) show it without
     # anyone touching Save - re-read cfg so THIS same page load reflects it.
@@ -327,6 +391,10 @@ def status():
     config_store.sync_resolved_device("biometric_name", health["biometric"].get("resolved_name", ""))
     config_store.sync_resolved_device("gps_name", health["gps"].get("resolved_name", ""))
     cfg = config_store.load()
+    # same verification the heartbeat applies, so this page and the dashboard agree
+    todays_test = (cfg.get("last_printer_test_result") or {}
+                   if cfg.get("last_printer_test_date") == date.today().isoformat() else {})
+    health = device_health.apply_verification(health, config_store.confirmed_map(cfg), todays_test)
     safe_cfg = {k: v for k, v in cfg.items() if k != "api_key"}
     current_printer = cfg.get("printer_name", "")
     current_microatm = cfg.get("microatm_name", "")
@@ -377,6 +445,61 @@ def status():
             "result": cfg.get("last_printer_test_result", {}),
         },
     })
+
+
+_snapshot = {"instances": None, "printers": None}
+
+
+def _scan_for_find():
+    devs = device_health.list_all_devices()
+    printers = [p["name"] for p in device_health.list_printers()]
+    return devs, printers
+
+
+@app.route("/snapshot", methods=["POST"])
+def snapshot():
+    """Plug-in test, step 1: remember every connected entry right now."""
+    devs, printers = _scan_for_find()
+    if not devs:
+        return jsonify({"ok": False})
+    _snapshot["instances"] = {d.get("instance") or d["name"] for d in devs}
+    _snapshot["printers"] = set(printers)
+    return jsonify({"ok": True, "count": len(devs) + len(printers)})
+
+
+@app.route("/detect", methods=["POST"])
+def detect():
+    """Plug-in test, step 2: which entries are new since step 1."""
+    if _snapshot["instances"] is None:
+        return jsonify({"ok": False, "error": "Please click Step 1 first (with the device unplugged)."})
+    devs, printers = _scan_for_find()
+    if not devs:
+        return jsonify({"ok": False})
+    appeared = []
+    for d in devs:
+        key = d.get("instance") or d["name"]
+        if key not in _snapshot["instances"] and not device_health.is_likely_virtual_usb_device(d["name"]):
+            appeared.append({"kind": "device", "name": d["name"], "instance": d.get("instance", ""),
+                             "label": device_health.device_label(d)})
+    for name in printers:
+        if name not in _snapshot["printers"] and not device_health.is_likely_virtual_printer(name):
+            appeared.append({"kind": "printer", "name": name, "instance": "", "label": name + " (installed printer)"})
+    return jsonify({"ok": True, "appeared": appeared})
+
+
+@app.route("/confirm", methods=["POST"])
+def confirm():
+    """Plug-in test, step 3: the person says which kind of device an entry that
+    appeared is. Saves it as the selection AND records that its identity was
+    confirmed, which is what lets the dashboard show it as verified."""
+    data = request.get_json(silent=True) or {}
+    dev = data.get("device")
+    name = (data.get("name") or "").strip()
+    if dev not in ("printer", "microatm", "biometric", "gps") or not name:
+        return jsonify({"ok": False}), 400
+    config_store.save(**{dev + "_name": name, dev + "_confirmed": name,
+                         dev + "_instance": (data.get("instance") or "").strip()})
+    return jsonify({"ok": True})
 
 
 @app.route("/configure", methods=["POST"])

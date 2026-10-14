@@ -19,6 +19,10 @@ NOT_DETECTED = "NOT_DETECTED"
 SCAN_ERROR = "SCAN_ERROR"
 UNKNOWN = "UNKNOWN"
 NOT_REPORTED = "NOT_REPORTED"  # agent too old to report this device at all
+# Plugged in with a working driver, but the agent could NOT confirm it is the
+# right kind of device (e.g. a generic "USB Input Device" entry was picked).
+# Deliberately NOT a problem state and NOT green: it must never read as OK.
+UNVERIFIED = "UNVERIFIED"
 
 # States that represent an actionable problem worth an incident.
 PROBLEM_STATES = {PROBLEM, NOT_DETECTED, SCAN_ERROR}
@@ -33,7 +37,11 @@ ONLINE_WINDOW_MIN = 15
 STALE_WINDOW_MIN = 60
 
 
-def derive_device_state(configured, present, ok, status_text: str) -> str:
+def derive_device_state(configured, present, ok, status_text: str, verified=None) -> str:
+    """`verified` is None for agents that do not report it (older versions):
+    those are treated as verified, since nothing says otherwise. Only an agent
+    that explicitly says verified=False turns an otherwise-OK device into
+    UNVERIFIED."""
     text = (status_text or "").lower()
     if "scan timed out" in text or "could not send test page" in text:
         return SCAN_ERROR
@@ -42,7 +50,7 @@ def derive_device_state(configured, present, ok, status_text: str) -> str:
     if not present:
         return NOT_DETECTED
     if ok:
-        return OK
+        return OK if verified is None or verified else UNVERIFIED
     return PROBLEM
 
 

@@ -92,7 +92,8 @@ def _safe_hostname() -> str:
 def build_payload(cfg: dict) -> dict:
     health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
                                  cfg.get("software_process", ""),
-                                 cfg.get("biometric_name", ""), cfg.get("gps_name", ""))
+                                 cfg.get("biometric_name", ""), cfg.get("gps_name", ""),
+                                 config_store.confirmed_map(cfg))
     # Self-configure: a confidently-recognized real device gets saved as the
     # actual selection, not just used transiently for this one check - so a
     # CSP with a recognizable printer and/or micro-ATM needs zero manual setup.
@@ -105,6 +106,9 @@ def build_payload(cfg: dict) -> dict:
         cfg, resolved_printer_name, health["printer"].get("present", False),
         resolved_printer_name in health.get("windows_printer_names", []),
         health["printer"].get("ok", False))
+    # Say, per device, whether we actually KNOW it is that kind of device. A
+    # merely-picked generic entry must never be reported as a healthy OK.
+    health = device_health.apply_verification(health, config_store.confirmed_map(cfg), functional)
     return {
         "schema_version": SCHEMA_VERSION,
         "agent_version": AGENT_VERSION,

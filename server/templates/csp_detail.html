@@ -19,6 +19,7 @@
   {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
   <span class="note">last reported before going offline: {{ c.printer_status or ('ok' if c.printer_ok else 'problem') }}</span>
   {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% elif c.printer_state == 'UNVERIFIED' %}<span class="badge badge-amber"><span class="dot"></span>unverified</span>
   {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
   {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>{% endif %}
   {% if not (c.devices_unknown and c.printer_configured) %}<span class="note">{{ c.printer_status or '' }}</span>{% endif %}
@@ -38,6 +39,7 @@
   {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
   <span class="note">last reported before going offline: {{ c.microatm_status or ('ok' if c.microatm_ok else 'problem') }}</span>
   {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% elif c.microatm_state == 'UNVERIFIED' %}<span class="badge badge-amber"><span class="dot"></span>unverified</span>
   {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>ok</span>
   {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>{% endif %}
   {% if not (c.devices_unknown and c.microatm_configured) %}<span class="note">{{ c.microatm_status or '' }}</span>{% endif %}
@@ -52,6 +54,8 @@
   {% elif c.devices_unknown and configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
   <span class="note">last reported before going offline: {{ c[dev ~ '_status'] or ('ok' if c[dev ~ '_ok'] else 'problem') }}</span>
   {% elif not configured %}<span class="badge badge-gray"><span class="dot"></span>not set up on CSP side</span>
+  {% elif c[dev ~ '_state'] == 'UNVERIFIED' %}<span class="badge badge-amber"><span class="dot"></span>unverified</span>
+  <span class="note">{{ c[dev ~ '_status'] or '' }}</span>
   {% elif c[dev ~ '_ok'] %}<span class="badge badge-green"><span class="dot"></span>ok</span>
   <span class="note">{{ c[dev ~ '_status'] or '' }}</span>
   {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>
