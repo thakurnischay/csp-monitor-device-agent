@@ -101,6 +101,8 @@ def build_payload(cfg: dict) -> dict:
     config_store.sync_resolved_device("microatm_name", health["microatm"].get("resolved_name", ""))
     config_store.sync_resolved_device("biometric_name", health["biometric"].get("resolved_name", ""))
     config_store.sync_resolved_device("gps_name", health["gps"].get("resolved_name", ""))
+    for dev in ("microatm", "biometric", "gps"):          # a confirmed device moved to another USB port
+        config_store.sync_moved_device(dev, health[dev])
     resolved_printer_name = health["printer"].get("resolved_name") or cfg.get("printer_name", "")
     functional = _maybe_run_printer_functional_test(
         cfg, resolved_printer_name, health["printer"].get("present", False),

@@ -390,6 +390,8 @@ def status():
     config_store.sync_resolved_device("microatm_name", health["microatm"].get("resolved_name", ""))
     config_store.sync_resolved_device("biometric_name", health["biometric"].get("resolved_name", ""))
     config_store.sync_resolved_device("gps_name", health["gps"].get("resolved_name", ""))
+    for dev in ("microatm", "biometric", "gps"):          # a confirmed device moved to another USB port
+        config_store.sync_moved_device(dev, health[dev])
     cfg = config_store.load()
     # same verification the heartbeat applies, so this page and the dashboard agree
     todays_test = (cfg.get("last_printer_test_result") or {}
@@ -505,8 +507,9 @@ def confirm():
     name = (data.get("name") or "").strip()
     if dev not in ("printer", "microatm", "biometric", "gps") or not name:
         return jsonify({"ok": False}), 400
-    config_store.save(**{dev + "_name": name, dev + "_confirmed": name,
-                         dev + "_instance": (data.get("instance") or "").strip()})
+    instance = (data.get("instance") or "").strip()
+    config_store.save(**{dev + "_name": name, dev + "_confirmed": name, dev + "_instance": instance,
+                         dev + "_fingerprint": device_health.fingerprint(name, instance)})
     return jsonify({"ok": True})
 
 
@@ -533,7 +536,9 @@ def configure():
     for dev in ("printer", "microatm", "biometric", "gps"):
         name = updates.get(dev + "_name")
         if name and name in _snapshot["appeared"]:
-            config_store.save(**{dev + "_confirmed": name, dev + "_instance": _snapshot["appeared"][name]})
+            inst = _snapshot["appeared"][name]
+            config_store.save(**{dev + "_confirmed": name, dev + "_instance": inst,
+                                 dev + "_fingerprint": device_health.fingerprint(name, inst)})
     return jsonify({"ok": True})
 
 

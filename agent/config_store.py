@@ -26,6 +26,10 @@ DEFAULTS = {
     "biometric_confirmed": "", "gps_confirmed": "",
     "printer_instance": "", "microatm_instance": "",
     "biometric_instance": "", "gps_instance": "",
+    # hardware identity (USB vendor/product id...) of the confirmed device, so it is
+    # found again after being moved to another USB port
+    "printer_fingerprint": {}, "microatm_fingerprint": {},
+    "biometric_fingerprint": {}, "gps_fingerprint": {},
     "software_process": "",
     "interval_seconds": 300,
     # Internal state for the once-a-day printer test print (see reporter.py) —
@@ -105,5 +109,21 @@ def confirmed_map(cfg: dict) -> dict:
     """The devices the person identified with the plug-in test:
     {"biometric": {"name": ..., "instance": ...}, ...}. Only counts while the
     saved selection is still that same device (checked by the caller)."""
-    return {d: {"name": cfg.get(d + "_confirmed", ""), "instance": cfg.get(d + "_instance", "")}
+    return {d: {"name": cfg.get(d + "_confirmed", ""), "instance": cfg.get(d + "_instance", ""),
+                "fingerprint": cfg.get(d + "_fingerprint") or {}}
             for d in ("printer", "microatm", "biometric", "gps")}
+
+
+def sync_moved_device(dev: str, status: dict) -> None:
+    """A confirmed device was found again under a new instance id / COM number
+    (moved to another USB port): remember the new ones, so the next check
+    matches it directly. Never raises."""
+    moved = (status or {}).get("moved_to")
+    if not moved:
+        return
+    try:
+        save(**{dev + "_name": moved["name"], dev + "_confirmed": moved["name"],
+                dev + "_instance": moved.get("instance", ""),
+                dev + "_fingerprint": moved.get("fingerprint") or {}})
+    except Exception:
+        pass

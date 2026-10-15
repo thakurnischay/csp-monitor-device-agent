@@ -244,8 +244,9 @@ class FindMyDeviceTests(unittest.TestCase):
         cfg = config_store.load()
         self.assertEqual((cfg["biometric_name"], cfg["biometric_confirmed"], cfg["biometric_instance"]),
                          ("USB Input Device", "USB Input Device", "HID\\SCN\\2"))
-        self.assertEqual(config_store.confirmed_map(cfg)["biometric"],
-                         {"name": "USB Input Device", "instance": "HID\\SCN\\2"})
+        got = config_store.confirmed_map(cfg)["biometric"]
+        self.assertEqual((got["name"], got["instance"]), ("USB Input Device", "HID\\SCN\\2"))
+        self.assertIn("fingerprint", got)
 
     def test_confirm_rejects_unknown_devices_and_blank_names(self):
         self.assertEqual(self.client.post("/confirm", json={"device": "toaster", "name": "x"}).status_code, 400)

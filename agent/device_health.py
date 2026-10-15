@@ -288,6 +288,7 @@ _USB_VENDORS = {
     "1162": "SecuGen",
 }
 _VID_PID = re.compile(r"VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", re.I)
+_MI = re.compile(r"&MI_([0-9A-F]{2})", re.I)
 # Manufacturer values Windows fills in for its own generic drivers - they say
 # nothing about who really made the device.
 _GENERIC_MAKERS = ("microsoft", "generic", "(standard", "compatible usb",
@@ -308,7 +309,9 @@ def _enrich_device(name: str, raw: dict) -> dict:
             "ok": status.upper() == "OK", "status": status or "unknown",
             "manufacturer": maker, "vid": vid, "pid": pid,
             "vendor": _USB_VENDORS.get(vid, ""),
-            "instance": str(raw.get("InstanceId") or "")}
+            "instance": str(raw.get("InstanceId") or ""),
+            "mi": (_MI.search(str(raw.get("InstanceId") or "")).group(1).upper()
+                   if _MI.search(str(raw.get("InstanceId") or "")) else "")}
 
 
 def search_text(d: dict) -> str:
@@ -687,7 +690,7 @@ def apply_verification(health: dict, confirmed: dict = None, functional: dict = 
         by = ""
         if d.get("verified"):
             by = d.get("verified_by") or "the device itself"
-        elif conf.get("name") and conf["name"] == name:
+        elif d.get("identity_confirmed") or (conf.get("name") and conf["name"] == name):
             by = "plug-in test"
         elif d.get("recognised"):
             by = "known brand"
@@ -737,27 +740,75 @@ def check(printer_name: str, microatm_name: str, software_process: str = "",
 _last_good = {"printers": [], "usb": [], "all": []}
 
 
-def _prefer_confirmed_instance(status: dict, devices: list, resolved_name: str, conf: dict) -> dict:
-    """Generic names ("USB Input Device") are shared by many devices - a
-    keyboard has the same name as a scanner. If the person identified THEIR
-    device with the plug-in test, track that one exact device (by its unique
-    Windows instance id) instead of whichever same-named entry comes first."""
+def fingerprint(name: str, instance: str) -> dict:
+    """What identifies THIS hardware regardless of which USB port it is in:
+    USB vendor id + product id (+ interface number for multi-function
+    devices). A device's Windows "instance id" often embeds the physical
+    port (for devices without a serial number), and a COM port's number can
+    change too - so neither is a stable identity on its own."""
+    m = _VID_PID.search(instance or "")
+    mi = _MI.search(instance or "")
+    return {"vid": m.group(1).upper() if m else "", "pid": m.group(2).upper() if m else "",
+            "mi": mi.group(1).upper() if mi else "",
+            "base": re.sub(r"\s*\(COM\d+\)", "", name or "").strip().lower()}
+
+
+def _same_hardware(d: dict, fp: dict) -> bool:
+    if fp.get("vid"):
+        return (d.get("vid") == fp["vid"] and d.get("pid") == fp["pid"]
+                and (not fp.get("mi") or d.get("mi") == fp["mi"]))
+    return bool(fp.get("base")) and fingerprint(d.get("name", ""), "")["base"] == fp["base"]
+
+
+def _resolve_confirmed_device(status: dict, devices: list, resolved_name: str, conf: dict):
+    """Track the device the person identified with the plug-in test.
+
+    Returns (status, moved_to). Tried in order:
+      1. the exact same Windows instance (same device, same port);
+      2. the same HARDWARE (USB vendor+product id [+interface]) showing up
+         under a new instance id or COM number - i.e. it was moved to another
+         USB port (or replugged and Windows renumbered it). If exactly one such
+         device is present it is the one: found again automatically, and
+         `moved_to` tells the caller to remember the new instance/name;
+      3. nothing matches - it really is not connected (or was replaced by a
+         different model, which needs Find my device again).
+    Generic names ("USB Input Device") are shared by many devices, which is why
+    the name alone is never used for a confirmed device."""
     try:
-        if not conf or not conf.get("instance") or conf.get("name") != resolved_name:
-            return status
-        for d in devices:
-            if d.get("instance") == conf["instance"]:
+        if not conf or not conf.get("name") or conf.get("name") != resolved_name:
+            return status, None
+        inst = conf.get("instance") or ""
+        fp = conf.get("fingerprint") or {}
+        if inst:
+            for d in devices:
+                if d.get("instance") == inst:
+                    out = dict(status)
+                    out.update({"configured": True, "present": True, "ok": d["ok"], "status": d["status"],
+                                "identity_confirmed": True})
+                    return out, None
+        if fp:
+            hits = [d for d in devices if _same_hardware(d, fp)]
+            several = len(hits) > 1
+            if several:            # identical interfaces: prefer one whose name still matches
+                same_name = [d for d in hits if d.get("name") == conf["name"]]
+                hits = same_name or hits
+            if hits:
+                d = hits[0]
                 out = dict(status)
-                out.update({"configured": True, "present": True, "ok": d["ok"], "status": d["status"]})
-                return out
-        # the confirmed device is not connected right now
+                note = " (found again: it was moved to a different USB port)"
+                if several:
+                    note = " (several identical devices are connected - tracking one of them)"
+                out.update({"configured": True, "present": True, "ok": d["ok"],
+                            "status": d["status"] + note, "identity_confirmed": True})
+                return out, {"name": d["name"], "instance": d.get("instance", ""),
+                             "fingerprint": fingerprint(d["name"], d.get("instance", ""))}
         out = dict(status)
         out.update({"configured": True, "present": False, "ok": False,
-                    "status": "not found - the device you identified is not connected right now"})
-        return out
+                    "status": "not found - the device you identified is not connected right now. Plug it "
+                              "back in; if you replaced it with a different model, use Find my device again."})
+        return out, None
     except Exception:
-        return status
-
+        return status, None
 
 
 def _scan_everything():
@@ -901,16 +952,28 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
         gps = gps_status(resolved_gps_name, gps_devices)
     except Exception:
         gps = {"configured": False, "present": False, "ok": False, "status": "check failed"}
-    microatm = _prefer_confirmed_instance(microatm, usb_devices, resolved_microatm_name,
-                                          (confirmed or {}).get("microatm"))
-    biometric = _prefer_confirmed_instance(biometric, bio_devices, resolved_biometric_name,
-                                           (confirmed or {}).get("biometric"))
-    gps = _prefer_confirmed_instance(gps, gps_devices, resolved_gps_name,
-                                     (confirmed or {}).get("gps"))
+    microatm, moved_microatm = _resolve_confirmed_device(
+        microatm, usb_devices, resolved_microatm_name, (confirmed or {}).get("microatm"))
+    biometric, moved_biometric = _resolve_confirmed_device(
+        biometric, bio_devices, resolved_biometric_name, (confirmed or {}).get("biometric"))
+    gps, moved_gps = _resolve_confirmed_device(
+        gps, gps_devices, resolved_gps_name, (confirmed or {}).get("gps"))
+    if moved_microatm:
+        resolved_microatm_name = moved_microatm["name"]
+    if moved_biometric:
+        resolved_biometric_name = moved_biometric["name"]
+    if moved_gps:
+        resolved_gps_name = moved_gps["name"]
     printer = _apply_software_signal(printer, software)
     microatm = _apply_software_signal(microatm, software)
     biometric["resolved_name"] = resolved_biometric_name
     gps["resolved_name"] = resolved_gps_name
+    if moved_microatm:
+        microatm["moved_to"] = moved_microatm
+    if moved_biometric:
+        biometric["moved_to"] = moved_biometric
+    if moved_gps:
+        gps["moved_to"] = moved_gps
     # Deeper "does it actually work" checks (RD service / NMEA data) - only
     # ever tighten an otherwise-OK verdict, never raise, see deep_checks.py.
     try:
