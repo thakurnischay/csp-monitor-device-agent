@@ -1,0 +1,7 @@
+# One CSP per line:  csp_id,api_key,name
+# csp_id = the CSP code on the dashboard (Fleet page).
+# api_key = the key shown ONCE on the dashboard's API Keys page when it was issued.
+#   (Lost it? Issue a new key for that CSP there - the old one stops working.)
+# Copy this file to  csp_list.csv  and fill it in. csp_list.csv is git-ignored.
+csp_id,api_key,name
+1A850000,PASTE_THIS_CSPS_API_KEY_HERE,Example CSP Name

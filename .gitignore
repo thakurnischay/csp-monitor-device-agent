@@ -19,3 +19,7 @@ local-run/
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# CSP credentials and the zips built from them - never commit
+tools/csp_list.csv
+tools/dist/
