@@ -115,6 +115,7 @@ _KNOWN_BIOMETRIC_BRANDS = (
     "mantra", "morpho", "idemia", "secugen", "startek", "precision biometric",
     "bioenable", "tatvik", "evolute", "aratek", "next biometrics", "cogent",
     "mfs100", "mfs110", "mis100", "fm220", "mso1300", "mso 1300",
+    "suprema", "digitalpersona", "futronic",
 )
 
 # USB GPS dongles (the "GPS Dongle Status" column in the ops Calling Sheet).
@@ -283,9 +284,16 @@ def _as_list(data) -> list:
 # device, so this is deliberately short). Used only to put a human-readable
 # maker next to a generic Windows name like "USB Serial Device (COM5)".
 _USB_VENDORS = {
-    "0403": "FTDI", "067B": "Prolific", "1A86": "QinHeng (CH340)",
-    "10C4": "Silicon Labs", "1546": "u-blox", "079B": "Sagem/Morpho",
-    "1162": "SecuGen",
+    # generic USB-serial chips: they name the CHIP, not what is plugged into it
+    "0403": "FTDI", "067B": "Prolific", "1A86": "QinHeng (CH340)", "10C4": "Silicon Labs",
+    # makers of the actual devices. The USB vendor id is set by the device's own
+    # maker, so it identifies the brand even when Windows shows a generic name
+    # like "USB Input Device". 2C0F and 225D were seen on real CSP scanners
+    # (Mantra MFS110 = 2C0F:1204, MorphoSmart MSO1300-E3 = 225D:000A).
+    "2C0F": "Mantra Softech", "225D": "Morpho/Idemia", "079B": "Sagem/Morpho",
+    "1162": "SecuGen", "16D1": "Suprema", "05BA": "DigitalPersona", "1491": "Futronic",
+    "0B00": "Ingenico", "11CA": "Verifone",
+    "1546": "u-blox", "091E": "Garmin",
 }
 _VID_PID = re.compile(r"VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", re.I)
 _MI = re.compile(r"&MI_([0-9A-F]{2})", re.I)
@@ -740,6 +748,28 @@ def check(printer_name: str, microatm_name: str, software_process: str = "",
 _last_good = {"printers": [], "usb": [], "all": []}
 
 
+def _prefer_recognised_same_name(status: dict, devices: list, resolved_name: str, brands: tuple) -> dict:
+    """Several entries can share one generic name ("USB Input Device": a
+    keyboard, a mouse, a scanner...). Looking a device up by name alone would
+    judge the FIRST of them. If exactly one of the same-named entries is
+    recognised by its maker / USB vendor id, that one is the device."""
+    try:
+        if not (status.get("configured") and resolved_name):
+            return status
+        same = [d for d in devices if d.get("name") == resolved_name]
+        if len(same) < 2:
+            return status
+        known = [d for d in same if is_recognised(d, brands)]
+        if len(known) != 1:
+            return status
+        d = known[0]
+        out = dict(status)
+        out.update({"present": True, "ok": d["ok"], "status": d["status"], "recognised": True})
+        return out
+    except Exception:
+        return status
+
+
 def fingerprint(name: str, instance: str) -> dict:
     """What identifies THIS hardware regardless of which USB port it is in:
     USB vendor id + product id (+ interface number for multi-function
@@ -952,6 +982,9 @@ def _check_impl(printer_name: str, microatm_name: str, software_process: str = "
         gps = gps_status(resolved_gps_name, gps_devices)
     except Exception:
         gps = {"configured": False, "present": False, "ok": False, "status": "check failed"}
+    microatm = _prefer_recognised_same_name(microatm, usb_devices, resolved_microatm_name, _KNOWN_MICROATM_BRANDS)
+    biometric = _prefer_recognised_same_name(biometric, bio_devices, resolved_biometric_name, _KNOWN_BIOMETRIC_BRANDS)
+    gps = _prefer_recognised_same_name(gps, gps_devices, resolved_gps_name, _KNOWN_GPS_BRANDS)
     microatm, moved_microatm = _resolve_confirmed_device(
         microatm, usb_devices, resolved_microatm_name, (confirmed or {}).get("microatm"))
     biometric, moved_biometric = _resolve_confirmed_device(
