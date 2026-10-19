@@ -4,12 +4,14 @@ import os
 import secrets as _secrets
 from logging.handlers import RotatingFileHandler
 
-from flask import Flask, abort, request
+from flask import Flask, Request, abort, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from api import api_bp
+from api_update import update_bp
 from db import setup
 from routes import ui_bp
+import routes_updates  # noqa: F401  (adds the Agent Updates / Enrollments pages to ui_bp)
 from security import get_csrf_token, verify_csrf
 from datetime import datetime, timezone, timedelta
 
@@ -31,8 +33,22 @@ def _configure_logging():
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s", handlers=handlers)
 
 
+class _Request(Request):
+    """Same 256 KB cap as always, except on the one admin route that uploads a signed release package."""
+    @property
+    def max_content_length(self):
+        if self.path == "/updates/upload" and self.method == "POST":
+            return 64 * 1024 * 1024
+        return self.application_max()
+
+    def application_max(self):
+        from flask import current_app
+        return current_app.config.get("MAX_CONTENT_LENGTH")
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.request_class = _Request
 
     secret = os.environ.get("CSP_MONITOR_SECRET_KEY")
     if not secret:
@@ -70,6 +86,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(ui_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(update_bp)
 
     app.jinja_env.globals["csrf_token"] = get_csrf_token
 

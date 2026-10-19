@@ -47,6 +47,7 @@ PAGE = """
 <h1>CSP Device Monitor Agent</h1>
 <p>Reports passbook-printer and micro-ATM connectivity to the central dashboard every few minutes.</p>
 
+<div id="enrollBanner" class="card" style="display:none"></div>
 <div class="card">
   <div id="scanBanner" style="display:none;background:#fdecea;color:#8a1c14;border:1px solid #f5c2bd;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:0.9rem"></div>
   <div class="row"><span><strong>Passbook printer</strong></span><span id="printerBadge" class="badge off">checking...</span></div>
@@ -343,6 +344,13 @@ function loadStatus() {
   xhrJson("GET", "/status", null, function (d) {
     clearTimeout(slowTimer);
     if (!d) { document.getElementById("msg").textContent = "Could not load status from the agent - is it still running?"; return; }
+    var eb = document.getElementById("enrollBanner"), en = d.enrollment || {};
+    if (en.status && en.status !== "approved") {
+      eb.style.display = "block";
+      eb.textContent = (en.status === "pending" || en.status === "error")
+        ? "Registration for " + (en.csp_name || en.csp_id) + " (" + en.csp_id + "): waiting for the administrator to approve this PC. Monitoring starts by itself once approved."
+        : "Registration problem: " + (en.message || en.status);
+    } else { eb.style.display = "none"; }
     var sb2 = document.getElementById("scanBanner");
     if (d.scan_problem) { sb2.textContent = d.scan_problem; sb2.style.display = "block"; }
     else { sb2.style.display = "none"; }
@@ -504,6 +512,8 @@ def status():
             if d["name"] not in labels or text.startswith("likely"):
                 labels[d["name"]] = text
     return jsonify({
+        "enrollment": {"status": cfg.get("enroll_status", ""), "message": cfg.get("enroll_message", ""),
+                       "csp_id": cfg.get("csp_id", ""), "csp_name": cfg.get("csp_name", "")},
         "device_labels": labels,
         "diagnosis": diagnosis_result,
         "scan_problem": health.get("scan_problem", ""),

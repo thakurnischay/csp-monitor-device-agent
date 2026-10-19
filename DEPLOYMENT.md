@@ -9,6 +9,8 @@
 | `CSP_MONITOR_FORCE_HTTPS` | No | `0` | Set to `1` once the deployment is genuinely behind TLS (Tailscale Funnel/nginx) — forces `Secure` session cookies. Leave `0` for local HTTP-only dev, or login sessions silently won't persist. |
 | `CSP_MONITOR_LOG_PATH` | No | `<server dir>/server.log` | Rotating log file location (5MB × 3 backups). |
 | `CSP_MONITOR_LOG_LEVEL` | No | `INFO` | `DEBUG`/`INFO`/`WARNING`/`ERROR`. |
+| `CSP_MONITOR_RELEASE_PUBKEYS` | For updates | `<server dir>/release_public_keys.json` | Public signing key(s) used to verify uploaded releases. Without one, every upload is refused. |
+| `CSP_MONITOR_RELEASE_DIR` | For updates | next to the database | Where uploaded release zips are stored. Keep on the same persistent volume as the DB (Docker volume), or releases vanish on container rebuild. |
 | `PORT` | No | `5100` | Only used by `python app.py`'s own dev-server `__main__` block — not relevant when running under `waitress-serve` (see Dockerfile). |
 
 **Never hardcode `CSP_MONITOR_SECRET_KEY` into a `Dockerfile` `ENV` line** —

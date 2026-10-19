@@ -36,7 +36,8 @@ DEFAULT_SERVER_URL = "https://openclaw-poweredge-r730.tailb276af.ts.net:8443/"
 AGENT_FILES = [
     "agent.py", "config_store.py", "deep_checks.py", "device_health.py", "diagnostics.py", "impact_map.py", "local_ui.py",
     "reporter.py", "singleton.py", "version.py", "diagnose.py", "requirements.txt",
-    "SETUP.bat", "DIAGNOSE.bat", "INSTALL_FOR_CSP.txt", "install_task.ps1", "uninstall_task.ps1",
+    "apply_update.py", "ed25519.py", "enroll.py", "release_manifest.py", "release_public_keys.json", "update_client.py",
+    "DIAGNOSE.bat", "INSTALL_FOR_CSP.txt", "install_task.ps1", "uninstall_task.ps1",
 ]
 _KEY_SHAPE = re.compile(r"^[A-Za-z0-9_-]{30,64}$")      # secrets.token_urlsafe(32) is 43 chars
 
@@ -91,6 +92,8 @@ def build_zip(csp_id: str, api_key: str, server_url: str, out_dir: str) -> str:
             if not os.path.isfile(path):
                 raise FileNotFoundError(f"agent file missing: {name}")
             z.write(path, top + name)
+        # per-CSP zips carry their own credentials, so they use the legacy one-click setup (shipped as SETUP.bat)
+        z.write(os.path.join(AGENT_DIR, "SETUP_LEGACY.bat"), top + "SETUP.bat")
         wheels = os.path.join(AGENT_DIR, "wheels")
         if os.path.isdir(wheels):
             for w in sorted(os.listdir(wheels)):

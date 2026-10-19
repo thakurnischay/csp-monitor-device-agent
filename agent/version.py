@@ -7,3 +7,14 @@ AGENT_VERSION = "2.0.0"
 # can tell "old agent, new field missing" apart from "new agent, old
 # behavior" without guessing from the agent version string.
 SCHEMA_VERSION = 4
+
+# Monotonic release number, stamped by tools/release_tool.py into every signed release. An agent
+# only installs a release whose sequence is HIGHER than this (downgrade protection). 0 = a development
+# build that was never produced by the release tool.
+AGENT_SEQUENCE = 0
+
+# What this agent can do, reported with every heartbeat so the dashboard knows whether it can be
+# updated centrally. A legacy agent (before this field existed) cannot, and shows as "needs one-time bootstrap".
+UPDATER_VERSION = "1.0"
+CAPABILITIES = {"remote_update": True, "updater": UPDATER_VERSION}
+

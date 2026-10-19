@@ -39,6 +39,9 @@ The one endpoint the agent calls. Also usable for manual/scripted testing.
 | `agent_version` | string | no | e.g. `"1.1.0"` |
 | `os` | string | no | e.g. `"Windows-10-10.0.26200-SP0"` |
 | `hostname` | string | no | the CSP PC's machine name |
+| `capabilities` | object | no | agent 2.0+ with remote updates: `{"remote_update": true, "updater": "1.0"}`. Absent on older agents, which the server treats as *not update-capable* (never targeted) |
+| `agent_sequence` | int | no | the agent's release sequence number (rises with every release; used for compatibility and anti-downgrade) |
+| `update_result` | object | no | outcome of an update the agent performed and has not yet had acknowledged: `{deployment_id, attempt, outcome: healthy|rolled_back|failed, detail}`. `healthy` + a matching `agent_version` is the only thing that makes a deployment **Successful** |
 
 Any missing/malformed sub-object degrades gracefully (treated as "not
 configured") rather than erroring — a buggy or old agent can't crash the
@@ -48,7 +51,7 @@ endpoint.
 
 | Status | Meaning |
 |---|---|
-| `200` | `{"ok": true, "received_at": "..."}` |
+| `200` | `{"ok": true, "received_at": "...", "update": {"deployment_id", "attempt", "version", "sequence"}}` — `update` is present **only** when this CSP has a pending, approved deployment |
 | `401` | `{"ok": false, "error": "invalid csp_id or API key"}` — wrong/revoked/mismatched key |
 | `413` | Payload over 64KB (`MAX_CONTENT_LENGTH`) |
 | `429` | `{"ok": false, "error": "too many reports, slow down"}` — more than 6 reports/min from this `csp_id` |
@@ -60,6 +63,30 @@ curl -X POST https://your-server/api/report \
   -H "X-API-Key: <key>" -H "Content-Type: application/json" \
   -d '{"csp_id":"1A850244","printer":{"configured":true,"present":true,"ok":true,"status":"idle (ready)"},"microatm":{"configured":true,"present":true,"ok":true,"status":"OK"}}'
 ```
+
+## Enrollment endpoints (no admin session; rate-limited per IP and per CSP code)
+
+| Endpoint | Auth | Body | Reply |
+|---|---|---|---|
+| `POST /api/enroll/verify` | none | `{csp_id, name}` | `{ok, verdict, message}`; verdict `ok` / `unknown_code` / `name_mismatch` / `no_name_on_record` / `invalid`. `400` unless ok. Verification alone grants nothing |
+| `POST /api/enroll` | `X-API-Key: <key the agent generated>` | `{csp_id, name, hostname, machine_id, agent_version}` | `{ok, status: pending|approved, request_id}`; `400` invalid/unknown/mismatch, `409` key already used by another CSP, `429` busy. Idempotent per key. The server stores only the key's SHA-256 |
+| `POST /api/enroll/status` | same key | `{csp_id}` | `{ok, status: pending|approved|rejected|superseded|unknown}` |
+
+A key from a *pending* enrollment cannot call `/api/report` (401) until approved.
+
+## Update endpoints (agent, `X-API-Key` of the CSP; manifest/package answer `409` with `proceed:false` when the deployment was cancelled/paused/revoked)
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/update/manifest?csp_id=&deployment_id=` | `{ok, attempt, manifest_b64, signature_b64}` — the exact signed manifest bytes (base64) and its Ed25519 signature |
+| `GET /api/update/package?csp_id=&deployment_id=` | the release zip; supports HTTP `Range` (resume); header `X-Package-SHA256` |
+| `POST /api/update/status` | `{csp_id, deployment_id, attempt, status: downloading|verifying|installing|restarting|failed, detail}` → `{ok, proceed}`; `proceed:false` tells the agent to stop. `successful` can **not** be reported this way |
+
+A CSP can only touch its **own** deployments. All three are rate-limited (90/min per CSP).
+
+## Admin routes added (session + CSRF, audited)
+
+`/updates` (page), `/updates/upload`, `/updates/action` (approve/revoke release; create/expand/pause/resume/cancel rollout; retry/cancel deployment; create/delete group), `/enrollments` (approve / reject / approve matching / import registry / pre-approve).
 
 ## `GET /api/v1`
 

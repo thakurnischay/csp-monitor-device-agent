@@ -31,6 +31,8 @@ DEFAULTS = {
     "printer_fingerprint": {}, "microatm_fingerprint": {},
     "biometric_fingerprint": {}, "gps_fingerprint": {},
     "software_process": "",
+    # registration: "" = an established agent (never enrolls); pending / approved / error / rejected / superseded
+    "csp_name": "", "enroll_status": "", "enroll_message": "",
     "interval_seconds": 300,
     # Internal state for the once-a-day printer test print (see reporter.py) —
     # not user-editable, not part of the /configure allowed-keys set.

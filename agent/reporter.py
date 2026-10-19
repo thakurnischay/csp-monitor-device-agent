@@ -16,6 +16,8 @@ import requests
 
 import config_store
 import diagnostics
+import enroll
+import update_client
 import device_health
 from version import AGENT_VERSION, SCHEMA_VERSION
 
@@ -91,6 +93,14 @@ def _safe_hostname() -> str:
         return ""
 
 
+def _update_fields():
+    """capabilities / agent_sequence / update_result for the heartbeat; never allowed to break it."""
+    try:
+        return update_client.payload_extras()
+    except Exception:
+        return {}
+
+
 _MAX_PAYLOAD_BYTES = 150 * 1024        # the server accepts 256 KB; stay well inside it
 
 
@@ -156,6 +166,7 @@ def build_payload(cfg: dict) -> dict:
         "gps": health["gps"],
         "printer_functional_test": functional,
         "diagnosis": diagnosis,
+        **_update_fields(),
     })
 
 
@@ -169,6 +180,13 @@ def report_once() -> dict:
     interval, same as before. Never retries on a 401 (a bad key won't fix
     itself by trying again)."""
     cfg = config_store.load()
+    # A brand-new PC waits here until the administrator approves it (it never sends a heartbeat before that);
+    # an established agent (enroll_status "") and an approved one go straight on.
+    if cfg.get("enroll_status") not in ("", "approved", None):
+        if not enroll.maintain(cfg):
+            state = config_store.load()
+            return {"ok": False, "error": state.get("enroll_message") or "waiting for the administrator to approve this PC"}
+        cfg = config_store.load()
     if not config_store.is_registered(cfg):
         return {"ok": False, "error": "agent not registered yet — set server URL, "
                                        "CSP ID and API key in the local status page"}
@@ -188,6 +206,14 @@ def report_once() -> dict:
                 return {"ok": False, "error": "server rejected the API key (401) — "
                                                "check CSP ID / API key in the status page"}
             r.raise_for_status()
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            try:        # acknowledge a delivered update outcome / start an offered update (background thread)
+                update_client.handle_heartbeat_response(cfg, body if isinstance(body, dict) else {}, "update_result" in payload)
+            except Exception:
+                log.exception("update hook failed (the heartbeat itself succeeded)")
             return {"ok": True, "payload": payload}
         except requests.RequestException as e:
             last_error = str(e)
@@ -209,6 +235,8 @@ def _loop():
         else:
             log.warning("report failed: %s", result["error"])
         interval = max(30, int(cfg.get("interval_seconds", 300)))
+        if config_store.load().get("enroll_status") in ("pending", "error"):
+            interval = 30                      # waiting for approval: check often so monitoring starts promptly
         _stop_event.wait(interval)
     log.info("reporter loop stopped")
 

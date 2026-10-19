@@ -1,0 +1,4 @@
+{
+  "_comment": "Public release-signing keys the agent trusts. Empty = the agent will refuse every update. Put the contents produced by `release_tool.py keygen` here.",
+  "keys": []
+}
