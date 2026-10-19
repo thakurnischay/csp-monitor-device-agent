@@ -13,6 +13,7 @@ from datetime import date
 from flask import Flask, jsonify, render_template_string, request
 
 import config_store
+import diagnostics
 import device_health
 import reporter
 
@@ -33,6 +34,11 @@ PAGE = """
   button { margin-top: 14px; padding: 8px 16px; font-size: 0.95rem; cursor: pointer; }
   .badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.8rem; color: #fff; }
   .ok { background: #1a7f37; } .bad { background: #c62828; } .off { background: #888; } .warn { background: #b26a00; }
+  .dg { border-left: 4px solid #c62828; background: #fff8f8; border-radius: 4px; padding: 8px 12px; margin: 8px 0; font-size: 0.86rem; }
+  .dg.ok { border-left-color: #1a7f37; background: #f6fbf7; } .dg.amber { border-left-color: #b26a00; background: #fffaf0; }
+  .dg h4 { margin: 0 0 4px; font-size: 0.92rem; } .dg ol, .dg ul { margin: 4px 0 4px 18px; padding: 0; }
+  .dg .why { color: #444; } .dg .tag { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; padding: 1px 7px; border-radius: 9px; background: #eee; margin-left: 6px; }
+  .dg button { margin-top: 6px; padding: 5px 12px; font-size: 0.85rem; }
   .found { border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin: 6px 0; font-size: 0.9rem; }
   .found button { margin-top: 6px; margin-right: 6px; padding: 4px 10px; font-size: 0.82rem; }
   .row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding: 6px 0; }
@@ -45,6 +51,7 @@ PAGE = """
   <div id="scanBanner" style="display:none;background:#fdecea;color:#8a1c14;border:1px solid #f5c2bd;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:0.9rem"></div>
   <div class="row"><span><strong>Passbook printer</strong></span><span id="printerBadge" class="badge off">checking...</span></div>
   <div id="printerDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
+  <div id="printerDiag"></div>
   <div id="printerAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <div id="printerFunctionalNote" style="color:#555;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which printer is it?</label>
@@ -55,6 +62,7 @@ PAGE = """
 
   <div class="row" style="margin-top:14px"><span><strong>Micro-ATM</strong></span><span id="microatmBadge" class="badge off">checking...</span></div>
   <div id="microatmDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
+  <div id="microatmDiag"></div>
   <div id="microatmAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which USB device is it?</label>
   <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Also filled in automatically for known micro-ATM brands. If it can't recognize your device, pick from the list, or type the exact device name yourself if the scan can't run at all. Leave it blank if this PC has no micro-ATM.</div>
@@ -64,6 +72,7 @@ PAGE = """
 
   <div class="row" style="margin-top:14px"><span><strong>Biometric device (fingerprint scanner)</strong></span><span id="biometricBadge" class="badge off">checking...</span></div>
   <div id="biometricDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
+  <div id="biometricDiag"></div>
   <div id="biometricAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which USB device is it?</label>
   <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Filled in automatically for known fingerprint-scanner brands (Mantra, Morpho, SecuGen, Startek and others). If it can't recognize yours, pick from the list, or type the exact device name. Leave it blank if this PC has no fingerprint scanner.</div>
@@ -73,6 +82,7 @@ PAGE = """
 
   <div class="row" style="margin-top:14px"><span><strong>GPS dongle</strong></span><span id="gpsBadge" class="badge off">checking...</span></div>
   <div id="gpsDetail" style="color:#666;font-size:0.9rem;margin-bottom:8px">-</div>
+  <div id="gpsDiag"></div>
   <div id="gpsAutoNote" style="color:#a15c00;font-size:0.82rem;margin-bottom:8px"></div>
   <label>Which device is it?</label>
   <div style="color:#666;font-size:0.82rem;margin-bottom:4px">Filled in automatically when the dongle's name says GPS/GNSS (u-blox, G-Mouse and similar). Many dongles only show up as a generic "USB-SERIAL ... (COM3)" device - if so, pick it from the list yourself. Leave it blank if this PC has no GPS dongle.</div>
@@ -262,6 +272,63 @@ function confirmDevice(key, item) {
     loadStatus();
   }, function () { document.getElementById("findResult").textContent = "Could not save - is the agent still running?"; }, 10000);
 }
+function el(tag, text, cls) {
+  var e = document.createElement(tag);
+  if (text) { e.textContent = text; }
+  if (cls) { e.className = cls; }
+  return e;
+}
+function renderDiag(prefix, dg) {
+  var box = document.getElementById(prefix + 'Diag');
+  if (!box) { return; }
+  box.innerHTML = '';
+  if (!dg || dg.health_state === 'NOT_SET_UP') { return; }
+  if (!dg.findings || !dg.findings.length) {
+    var ok = el('div', null, 'dg ' + (dg.health_state === 'HEALTHY' ? 'ok' : 'amber'));
+    ok.appendChild(el('strong', dg.summary || 'No problem found'));
+    if (dg.verification && dg.verification.status === 'recovery_verified') {
+      ok.appendChild(el('div', 'Recovery verified: the earlier problem is gone and the latest checks pass.'));
+    }
+    for (var n = 0; n < (dg.notes || []).length; n++) { ok.appendChild(el('div', 'Note: ' + dg.notes[n], 'why')); }
+    box.appendChild(ok);
+    return;
+  }
+  for (var i = 0; i < dg.findings.length; i++) {
+    (function (f) {
+      var d = el('div', null, 'dg' + (f.severity === 'low' || f.severity === 'medium' ? ' amber' : ''));
+      var h = el('h4', f.title);
+      h.appendChild(el('span', f.severity, 'tag'));
+      h.appendChild(el('span', f.confidence, 'tag'));
+      d.appendChild(h);
+      d.appendChild(el('div', 'Why: ' + f.root_cause, 'why'));
+      var det = document.createElement('details');
+      det.appendChild(el('summary', 'Evidence'));
+      var ul = document.createElement('ul');
+      for (var k = 0; k < f.evidence.length; k++) { ul.appendChild(el('li', f.evidence[k])); }
+      det.appendChild(ul);
+      d.appendChild(det);
+      d.appendChild(el('div', 'What to do:'));
+      var ol = document.createElement('ol');
+      for (var j = 0; j < f.actions.length; j++) { ol.appendChild(el('li', f.actions[j])); }
+      d.appendChild(ol);
+      if (f.auto_fix && f.auto_fix.type === 'start_service') {
+        var b = el('button', 'Start it now (' + f.auto_fix.label + ')');
+        b.onclick = function () { startService(f.auto_fix.service, f.auto_fix.label); };
+        d.appendChild(b);
+        d.appendChild(el('div', 'This starts only that one Windows service, once, after you confirm. It is checked again afterwards.', 'why'));
+      }
+      box.appendChild(d);
+    })(dg.findings[i]);
+  }
+}
+function startService(service, label) {
+  if (!confirm("Start the Windows service '" + label + "' now? This only starts that one service, once. Nothing else is changed.")) { return; }
+  document.getElementById('msg').textContent = 'Starting ' + label + '...';
+  xhrJson('POST', '/fix', {service: service}, function (d) {
+    document.getElementById('msg').textContent = d && d.message ? d.message : 'Done.';
+    loadStatus();
+  }, function () { document.getElementById('msg').textContent = 'Could not reach the agent.'; }, 90000);
+}
 function pickDevice(prefix) {
   var pick = document.getElementById(prefix + "Pick");
   if (pick && pick.value) { document.getElementById(prefix + "Select").value = pick.value; }
@@ -279,6 +346,9 @@ function loadStatus() {
     var sb2 = document.getElementById("scanBanner");
     if (d.scan_problem) { sb2.textContent = d.scan_problem; sb2.style.display = "block"; }
     else { sb2.style.display = "none"; }
+    var dgs = d.diagnosis || {};
+    renderDiag('printer', dgs.printer); renderDiag('microatm', dgs.microatm);
+    renderDiag('biometric', dgs.biometric); renderDiag('gps', dgs.gps);
     badge("printerBadge", "printerDetail", d.printer, "printerAutoNote", d.config.printer_name);
     badge("microatmBadge", "microatmDetail", d.microatm, "microatmAutoNote", d.config.microatm_name);
     badge("biometricBadge", "biometricDetail", d.biometric, "biometricAutoNote", d.config.biometric_name);
@@ -397,6 +467,10 @@ def status():
     todays_test = (cfg.get("last_printer_test_result") or {}
                    if cfg.get("last_printer_test_date") == date.today().isoformat() else {})
     health = device_health.apply_verification(health, config_store.confirmed_map(cfg), todays_test)
+    try:
+        diagnosis_result = diagnostics.analyze(health, cfg, todays_test)
+    except Exception:
+        diagnosis_result = {}
     safe_cfg = {k: v for k, v in cfg.items() if k != "api_key"}
     current_printer = cfg.get("printer_name", "")
     current_microatm = cfg.get("microatm_name", "")
@@ -431,6 +505,7 @@ def status():
                 labels[d["name"]] = text
     return jsonify({
         "device_labels": labels,
+        "diagnosis": diagnosis_result,
         "scan_problem": health.get("scan_problem", ""),
         "printer": health["printer"],
         "microatm": health["microatm"],
@@ -511,6 +586,23 @@ def confirm():
     config_store.save(**{dev + "_name": name, dev + "_confirmed": name, dev + "_instance": instance,
                          dev + "_fingerprint": device_health.fingerprint(name, instance)})
     return jsonify({"ok": True})
+
+
+@app.route("/fix", methods=["POST"])
+def fix():
+    """Start ONE Windows service the current diagnosis proposes - only because
+    the operator clicked and confirmed. Never automatic; tried once, then the
+    result is verified by the next diagnosis (the page reloads it)."""
+    service = ((request.get_json(silent=True) or {}).get("service") or "").strip()
+    cfg = config_store.load()
+    health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
+                                 cfg.get("software_process", ""), cfg.get("biometric_name", ""),
+                                 cfg.get("gps_name", ""), config_store.confirmed_map(cfg))
+    todays_test = (cfg.get("last_printer_test_result") or {}
+                   if cfg.get("last_printer_test_date") == date.today().isoformat() else {})
+    health = device_health.apply_verification(health, config_store.confirmed_map(cfg), todays_test)
+    diagnosis_result = diagnostics.analyze(health, cfg, todays_test)
+    return jsonify(diagnostics.start_service(service, diagnosis_result))
 
 
 @app.route("/configure", methods=["POST"])

@@ -55,6 +55,13 @@ def _cached(key, fn):
     return value, True
 
 
+def clear_cache():
+    """Forget cached RD / serial answers so the next check looks again (used right
+    after a corrective action, so recovery is verified against the new state)."""
+    with _lock:
+        _cache.clear()
+
+
 def reset_state():
     """For tests."""
     global _rd_seen
@@ -119,6 +126,20 @@ def _rd_name(service: dict) -> str:
 
 
 def apply_biometric_rd_check(bio: dict) -> dict:
+    """Verdict (see _rd_verdict) plus the raw RD answers, for the diagnosis."""
+    out = _rd_verdict(bio)
+    if not (bio.get("configured") and bio.get("present") and not bio.get("ok")):
+        try:
+            services, _ = _cached("rd", probe_rd_services)
+        except Exception:
+            services = None
+        if services is not None:
+            out = dict(out)
+            out["rd"] = [{"status": x.get("status"), "info": x.get("info"), "port": x.get("port")} for x in services]
+    return out
+
+
+def _rd_verdict(bio: dict) -> dict:
     """Use the scanner's RD service as EVIDENCE of what the device is - never
     as a reason to call it broken.
 
@@ -265,12 +286,15 @@ def apply_gps_nmea_check(gps: dict) -> dict:
         info = parse_nmea(text)
         out["verified"] = True       # it really is streaming GPS data
         out["verified_by"] = "GPS data"
+        out["gps_check"] = "DATA"
+        out["gps_fix"] = bool(info["fix"])
         if info["fix"]:
             sats = f", {info['satellites']} satellites" if info["satellites"] is not None else ""
             out["status"] = gps["status"] + f" (receiving data, satellite fix{sats})"
         else:
             out["status"] = gps["status"] + " (receiving data, no satellite fix yet - normal indoors)"
         return out
+    out["gps_check"] = kind
     if kind == "BUSY":
         out["status"] = gps["status"] + " (GPS data check skipped: " + port + " is in use by another program)"
         return out

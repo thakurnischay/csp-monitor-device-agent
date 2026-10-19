@@ -1,10 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Fleet - CSP Device Monitor{% endblock %}
 {% block body %}
+{% macro diag_badge(c, dev) %}
+  {% set dg = c[dev ~ '_diag'] %}
+  <span class="badge badge-{{ dg.colour }}" title="{{ dg.summary }}"><span class="dot"></span>{{ dg.label }}</span>{% if dg.severity != 'none' and dg.health_state not in ('NOT_SET_UP', 'UNVERIFIED') %}<span class="sev sev-{{ dg.severity }}">{{ dg.severity }}</span>{% endif %}
+  {% if dg.health_state == 'HEALTHY' and dg.recovery_verified %}<div class="sub">Recovery verified</div>
+  {% elif dg.health_state not in ('HEALTHY', 'NOT_SET_UP') and dg.summary %}<div class="sub">{{ dg.summary }}</div>{% endif %}
+{% endmacro %}
 {% macro device_cell(c, dev) %}
   {% set configured = c[dev ~ '_configured'] %}
   {% set ok = c[dev ~ '_ok'] %}
-  {% if not c.new_devices_reported %}<span class="note" title="This CSP's agent is an older version that doesn't report this device yet - update the agent">&ndash;</span>
+  {% if c[dev ~ '_diag'] and not c.devices_unknown %}{{ diag_badge(c, dev) }}
+  {% elif not c.new_devices_reported %}<span class="note" title="This CSP's agent is an older version that doesn't report this device yet - update the agent">&ndash;</span>
   {% elif c.devices_unknown and configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
   {% elif not configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
   {% elif c[dev ~ '_state'] == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
@@ -27,7 +34,7 @@
     </div>
   </div>
 </div>
-<p class="note" style="margin-top:10px">Online = reported within the last {{ window }} minutes; Stale = reported within the last hour but not recently; Offline = longer than that, or never. <strong>Unverified</strong> (amber) = the device is plugged in, but the agent could not confirm it is the right device, because a generic entry such as "USB Input Device" was picked - it is not shown as OK until the CSP uses <em>Find my device</em> on the agent page. <strong>Disconnected</strong> under a device means the CSP's PC is offline, so the device's current status can't be checked (last known status is shown on hover). A dash (&ndash;) means that CSP's agent is an older version that doesn't report that device yet.</p>
+<p class="note" style="margin-top:10px">Online = reported within the last {{ window }} minutes; Stale = reported within the last hour but not recently; Offline = longer than that, or never. Device cells show a <strong>root-cause diagnosis</strong> (agent 2.0+): <em>Software issue</em>, <em>Driver issue</em>, <em>Suspected hardware failure</em> and <em>Service unavailable</em> are diagnosed faults; <em>Degraded</em> works with a limitation (for example low paper); <em>Diagnosis required</em> means the evidence is not enough yet. The coloured tag (Critical / High / Medium / Low) is the business severity; open a CSP for the evidence, affected workflows and recommended steps. <strong>Unverified</strong> (amber) = the device is plugged in, but the agent could not confirm it is the right device, because a generic entry such as "USB Input Device" was picked - it is not shown as OK until the CSP uses <em>Find my device</em> on the agent page. <strong>Disconnected</strong> under a device means the CSP's PC is offline, so the device's current status can't be checked (last known status is shown on hover). A dash (&ndash;) means that CSP's agent is an older version that doesn't report that device yet.</p>
 
 <div class="kpi-grid">
   <div class="kpi-card">
@@ -101,6 +108,14 @@
     <div class="kpi-value">{{ unverified_devices }}</div>
     <div class="kpi-label">Unverified devices</div>
   </div>
+  <div class="kpi-card tint-bad">
+    <div class="kpi-top">
+      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6"/></svg></div>
+      <span class="kpi-dot bad"></span>
+    </div>
+    <div class="kpi-value">{{ urgent_issues }}</div>
+    <div class="kpi-label">Critical / high issues</div>
+  </div>
 </div>
 
 <form method="get" class="toolbar">
@@ -156,7 +171,8 @@
       </td>
       <td title="{{ c.last_seen | ist }}" class="note">{{ c.last_seen | relative_time }}</td>
       <td>
-        {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.printer_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
+        {% if c.printer_diag and not c.devices_unknown %}{{ diag_badge(c, 'printer') }}
+        {% elif c.devices_unknown and c.printer_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.printer_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
         {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
         {% elif c.printer_state == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
         {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
@@ -164,7 +180,8 @@
         {% if c.printer_test_ran and not c.devices_unknown %}<div class="note" style="font-size:0.76rem;margin-top:3px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
       </td>
       <td>
-        {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.microatm_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
+        {% if c.microatm_diag and not c.devices_unknown %}{{ diag_badge(c, 'microatm') }}
+        {% elif c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.microatm_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
         {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
         {% elif c.microatm_state == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
         {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>

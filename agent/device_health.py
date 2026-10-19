@@ -303,6 +303,14 @@ _GENERIC_MAKERS = ("microsoft", "generic", "(standard", "compatible usb",
                    "standard system devices", "windows")
 
 
+def _as_int(value) -> int:
+    """0 for None / blank / anything that is not a whole number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _enrich_device(name: str, raw: dict) -> dict:
     """One PnP row -> the dict the rest of the module uses, plus the extra
     identifying detail (maker, USB vendor/product id) the setup page shows so
@@ -318,6 +326,10 @@ def _enrich_device(name: str, raw: dict) -> dict:
             "manufacturer": maker, "vid": vid, "pid": pid,
             "vendor": _USB_VENDORS.get(vid, ""),
             "instance": str(raw.get("InstanceId") or ""),
+            # Windows' own verdict on the device: 0 = no problem, otherwise a
+            # Device Manager error code ("Code 28: drivers not installed", ...)
+            "cm_code": _as_int(raw.get("ConfigManagerErrorCode")),
+            "problem": str(raw.get("ProblemDescription") or ""),
             "mi": (_MI.search(str(raw.get("InstanceId") or "")).group(1).upper()
                    if _MI.search(str(raw.get("InstanceId") or "")) else "")}
 
@@ -388,7 +400,8 @@ def list_usb_devices() -> list:
     data = _run_ps(
         "Get-PnpDevice -PresentOnly | "
         f"Where-Object {{ $_.Class -in @({class_filter}) }} | "
-        "Select-Object FriendlyName, Class, Status, Manufacturer, InstanceId | ConvertTo-Json -Compress")
+        "Select-Object FriendlyName, Class, Status, Manufacturer, InstanceId, ConfigManagerErrorCode, "
+        "ProblemDescription | ConvertTo-Json -Compress")
     out = []
     for d in _as_list(data):
         if not isinstance(d, dict):
@@ -412,7 +425,8 @@ def list_all_devices() -> list:
     is. [{"name", "class", "ok", "status"}] — best-effort, never raises."""
     data = _run_ps(
         "Get-PnpDevice -PresentOnly | "
-        "Select-Object FriendlyName, Class, Status, Manufacturer, InstanceId | ConvertTo-Json -Compress")
+        "Select-Object FriendlyName, Class, Status, Manufacturer, InstanceId, ConfigManagerErrorCode, "
+        "ProblemDescription | ConvertTo-Json -Compress")
     out = []
     for d in _as_list(data):
         if not isinstance(d, dict):
@@ -468,7 +482,7 @@ def printer_status(configured_name: str, printers: list = None) -> dict:
     match = _find_by_name_or_prefix(configured_name, printers)
     if match:
         return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"],
-                "recognised": is_recognised(match, _KNOWN_PRINTER_BRANDS)}
+                "recognised": is_recognised(match, _KNOWN_PRINTER_BRANDS), "_row": match}
     return {"configured": True, "present": False, "ok": False,
             "status": "not found — check the printer is connected and installed"}
 
@@ -485,7 +499,7 @@ def microatm_status(configured_name: str, usb_devices: list = None) -> dict:
     match = _find_by_name_or_prefix(configured_name, usb_devices)
     if match:
         return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"],
-                "recognised": is_recognised(match, _KNOWN_MICROATM_BRANDS)}
+                "recognised": is_recognised(match, _KNOWN_MICROATM_BRANDS), "_row": match}
     return {"configured": True, "present": False, "ok": False,
             "status": "not found — check the device is plugged in"}
 
@@ -557,7 +571,7 @@ def _device_status(configured_name: str, devices: list, not_found: str, brands: 
         # hardware (brand/maker match). A pick that does not is only a
         # driver-level "plugged in" - deep_checks.py says so on the status.
         return {"configured": True, "present": True, "ok": match["ok"], "status": match["status"],
-                "recognised": is_recognised(match, brands)}
+                "recognised": is_recognised(match, brands), "_row": match}
     return {"configured": True, "present": False, "ok": False, "status": not_found}
 
 
@@ -764,7 +778,7 @@ def _prefer_recognised_same_name(status: dict, devices: list, resolved_name: str
             return status
         d = known[0]
         out = dict(status)
-        out.update({"present": True, "ok": d["ok"], "status": d["status"], "recognised": True})
+        out.update({"present": True, "ok": d["ok"], "status": d["status"], "recognised": True, "_row": d})
         return out
     except Exception:
         return status
@@ -814,7 +828,7 @@ def _resolve_confirmed_device(status: dict, devices: list, resolved_name: str, c
                 if d.get("instance") == inst:
                     out = dict(status)
                     out.update({"configured": True, "present": True, "ok": d["ok"], "status": d["status"],
-                                "identity_confirmed": True})
+                                "identity_confirmed": True, "_row": d})
                     return out, None
         if fp:
             hits = [d for d in devices if _same_hardware(d, fp)]
@@ -829,7 +843,7 @@ def _resolve_confirmed_device(status: dict, devices: list, resolved_name: str, c
                 if several:
                     note = " (several identical devices are connected - tracking one of them)"
                 out.update({"configured": True, "present": True, "ok": d["ok"],
-                            "status": d["status"] + note, "identity_confirmed": True})
+                            "status": d["status"] + note, "identity_confirmed": True, "_row": d})
                 return out, {"name": d["name"], "instance": d.get("instance", ""),
                              "fingerprint": fingerprint(d["name"], d.get("instance", ""))}
         out = dict(status)

@@ -1,6 +1,60 @@
 {% extends "base.html" %}
 {% block title %}{{ c.name or c.csp_id }} - CSP Device Monitor{% endblock %}
 {% block body %}
+{% macro diag_panel(c, dev, title, dev_issues) %}
+{% set dg = c[dev ~ '_diag'] %}
+{% set d = dg.detail or {} %}
+{% set impact = d.impact or {} %}
+{% set open_issues = dev_issues | selectattr('status', 'equalto', 'OPEN') | list %}
+{% set past = dev_issues | selectattr('status', 'equalto', 'RESOLVED') | list %}
+<div class="panel">
+  <div class="diag-head">
+    <h2>{{ title }}</h2>
+    {% if c.devices_unknown %}<span class="badge badge-gray"><span class="dot"></span>Disconnected - CSP offline</span>
+    <span class="note">last diagnosis before going offline: {{ dg.label }}</span>
+    {% else %}<span class="badge badge-{{ dg.colour }}"><span class="dot"></span>{{ dg.label }}</span>{% if dg.severity != 'none' and dg.health_state not in ('NOT_SET_UP', 'UNVERIFIED') %}<span class="sev sev-{{ dg.severity }}">{{ dg.severity }}</span>{% endif %}{% endif %}
+  </div>
+  <p class="diag-summary">{{ dg.summary }}</p>
+  {% if d.verification and d.verification.status == 'recovery_verified' and not open_issues %}
+  <p class="note"><span class="badge badge-green"><span class="dot"></span>Recovery verified</span> {{ d.verification.note }} (checked {{ d.verification.at | relative_time }})</p>
+  {% endif %}
+
+  {% for f in open_issues %}
+  <div class="issue">
+    <h3>{{ f.title }}<span class="conf conf-{{ f.confidence }}">{{ f.confidence }}</span></h3>
+    <dl>
+      <dt>Symptom</dt><dd>{{ f.symptom }}</dd>
+      <dt>Likely root cause</dt><dd>{{ f.root_cause }}
+        <div class="note">{% if f.confidence == 'confirmed' %}Confirmed: Windows or the device itself reports this.
+        {% elif f.confidence == 'likely' %}Likely: the evidence points here, but it is not proven.
+        {% else %}Possible lead only - not confirmed.{% endif %}</div></dd>
+      <dt>Evidence</dt><dd><ul>{% for e in f.evidence %}<li>{{ e }}</li>{% endfor %}</ul></dd>
+      <dt>Affected workflow</dt><dd>
+        {% if impact.workflows %}<ul>{% for w in impact.workflows %}<li>{{ w.name }} <span class="note">({{ 'confirmed by operations' if w.confirmed else 'assumed - not yet confirmed' }}{% if w.needs == 'unknown' %}; how it is used is not known{% endif %})</span></li>{% endfor %}</ul>{% else %}Not established.{% endif %}</dd>
+      <dt>Business impact</dt><dd>{{ impact.assessment }}
+        {% if impact.workaround %}<div class="note">Workaround: {{ impact.workaround }}</div>{% endif %}
+        <div class="note">Revenue: {{ impact.revenue }}</div></dd>
+      <dt>Recommended steps</dt><dd><ol>{% for a in f.actions %}<li>{{ a }}</li>{% endfor %}</ol></dd>
+      <dt>Who acts</dt><dd>{% if f.auto_fix %}Operator approval needed: the CSP can click <em>Start it now</em> on the agent page (http://127.0.0.1:5057) - nothing is changed automatically.
+        {% elif f.operator_action %}Operator action required on the CSP's PC.{% else %}No action needed.{% endif %}</dd>
+      <dt>Timeline</dt><dd>Since {{ f.first_seen | ist }} ({{ f.first_seen | relative_time }}) &middot; occurrence {{ f.occurrences }} of this issue{% if f.occurrences > 1 %} (it has happened before){% endif %}</dd>
+    </dl>
+  </div>
+  {% endfor %}
+
+  {% if d.notes %}<p class="note"><strong>Notes</strong> (informational, not faults):</p><ul class="note">{% for n in d.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+  <details class="more"><summary>What was checked and what could not be</summary>
+    <p><strong>Checked on the CSP's PC:</strong></p><ul>{% for x in d.checked %}<li>{{ x }}</li>{% endfor %}</ul>
+    <p><strong>Not checked (needs hardware, vendor access or another integration):</strong></p><ul>{% for x in d.not_checked %}<li>{{ x }}</li>{% endfor %}</ul>
+    <p class="note">Last check with no problem found: {% if dg.last_healthy_at %}{{ dg.last_healthy_at | ist }} ({{ dg.last_healthy_at | relative_time }}){% else %}never recorded{% endif %}</p>
+  </details>
+  {% if d.actions_taken %}<details class="more"><summary>Corrective actions taken on this PC</summary><ul>{% for a in d.actions_taken %}<li>{{ a.t | ist }} - {{ a.action }} {{ a.target }}: {{ a.result }}</li>{% endfor %}</ul></details>{% endif %}
+  {% if past %}<details class="more"><summary>Diagnostic history ({{ past | length }} earlier issue{{ 's' if past | length != 1 }})</summary>
+    <table><thead><tr><th>Issue</th><th>First seen</th><th>Resolved</th><th>Occurrence</th></tr></thead><tbody>
+    {% for p in past %}<tr><td>{{ p.title }} <span class="note">({{ p.severity }})</span></td><td>{{ p.first_seen | ist }}</td><td>{{ p.resolved_at | ist }}</td><td>{{ p.occurrences }}</td></tr>{% endfor %}
+    </tbody></table></details>{% endif %}
+</div>
+{% endmacro %}
 <p class="note"><a href="{{ url_for('ui.fleet') }}" style="color:var(--accent)">&larr; Fleet</a></p>
 <h1>{{ c.name or c.csp_id }}</h1>
 <p class="note">Code {{ c.csp_id }} &middot;
@@ -14,6 +68,9 @@
 </p>
 {% endif %}
 
+{% for dev, title in [('printer', 'Passbook printer'), ('microatm', 'Micro-ATM'), ('biometric', 'Biometric device (fingerprint scanner)'), ('gps', 'GPS dongle')] %}
+{% if c[dev ~ '_diag'] %}{{ diag_panel(c, dev, title, issues[dev]) }}
+{% elif dev == 'printer' %}
 <div class="panel">
   <h2 style="font-size:1.05rem">Passbook printer</h2>
   {% if c.devices_unknown and c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
@@ -34,6 +91,7 @@
   {% endif %}
 </div>
 
+{% elif dev == 'microatm' %}
 <div class="panel">
   <h2 style="font-size:1.05rem">Micro-ATM</h2>
   {% if c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>disconnected - CSP offline</span>
@@ -45,7 +103,7 @@
   {% if not (c.devices_unknown and c.microatm_configured) %}<span class="note">{{ c.microatm_status or '' }}</span>{% endif %}
 </div>
 
-{% for dev, title in [('biometric', 'Biometric device (fingerprint scanner)'), ('gps', 'GPS dongle')] %}
+{% else %}
 {% set configured = c[dev ~ '_configured'] %}
 <div class="panel">
   <h2 style="font-size:1.05rem">{{ title }}</h2>
@@ -61,6 +119,7 @@
   {% else %}<span class="badge badge-red"><span class="dot"></span>problem</span>
   <span class="note">{{ c[dev ~ '_status'] or '' }}</span>{% endif %}
 </div>
+{% endif %}
 {% endfor %}
 
 <p class="note">Printer/micro-ATM status above is a connectivity check (device

@@ -4,6 +4,7 @@ two configured devices and POSTs the result to the central server. Runs
 forever in a background thread; a single failed check or a server that is
 temporarily unreachable must never stop the loop.
 """
+import json
 import logging
 import platform
 import socket
@@ -14,6 +15,7 @@ from datetime import date, datetime, timezone
 import requests
 
 import config_store
+import diagnostics
 import device_health
 from version import AGENT_VERSION, SCHEMA_VERSION
 
@@ -89,6 +91,27 @@ def _safe_hostname() -> str:
         return ""
 
 
+_MAX_PAYLOAD_BYTES = 150 * 1024        # the server accepts 256 KB; stay well inside it
+
+
+def _fit(payload: dict) -> dict:
+    """Keep the report under the size limit by trimming the diagnosis detail
+    (never the basic status): evidence and steps first, then the detail lists."""
+    try:
+        if len(json.dumps(payload, default=str)) <= _MAX_PAYLOAD_BYTES:
+            return payload
+        for dev, d in (payload.get("diagnosis") or {}).items():
+            for f in d.get("findings", []):
+                f["evidence"] = f.get("evidence", [])[:3]
+                f["actions"] = f.get("actions", [])[:5]
+            d["checked"], d["not_checked"], d["notes"] = [], [], []
+        if len(json.dumps(payload, default=str)) > _MAX_PAYLOAD_BYTES:
+            payload["diagnosis"] = {}
+    except Exception:
+        pass
+    return payload
+
+
 def build_payload(cfg: dict) -> dict:
     health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
                                  cfg.get("software_process", ""),
@@ -111,7 +134,16 @@ def build_payload(cfg: dict) -> dict:
     # Say, per device, whether we actually KNOW it is that kind of device. A
     # merely-picked generic entry must never be reported as a healthy OK.
     health = device_health.apply_verification(health, config_store.confirmed_map(cfg), functional)
-    return {
+    # Root-cause diagnosis from real Windows/vendor evidence. If it ever fails the
+    # heartbeat still goes out with the basic status, never the other way round.
+    try:
+        diagnosis = diagnostics.analyze(health, cfg, functional)
+    except Exception:
+        diagnosis = {}
+    health = dict(health)
+    for dev in diagnostics.DEVICES:           # internal match details are not part of the report
+        health[dev] = {k: v for k, v in health[dev].items() if not str(k).startswith("_")}
+    return _fit({
         "schema_version": SCHEMA_VERSION,
         "agent_version": AGENT_VERSION,
         "os": _safe_os_info(),
@@ -123,7 +155,8 @@ def build_payload(cfg: dict) -> dict:
         "biometric": health["biometric"],
         "gps": health["gps"],
         "printer_functional_test": functional,
-    }
+        "diagnosis": diagnosis,
+    })
 
 
 def report_once() -> dict:

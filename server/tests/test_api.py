@@ -77,7 +77,7 @@ class ReportEndpointTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_oversized_payload_is_rejected(self):
-        huge = {"csp_id": "CSP001", "printer": {"status": "x" * (100 * 1024)}, "microatm": {}}
+        huge = {"csp_id": "CSP001", "printer": {"status": "x" * (300 * 1024)}, "microatm": {}}
         resp = self.client.post("/api/report", headers={"X-API-Key": self.key}, json=huge)
         self.assertEqual(resp.status_code, 413)
 

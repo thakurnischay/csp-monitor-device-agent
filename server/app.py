@@ -57,7 +57,7 @@ def create_app() -> Flask:
     app.config.update(
         # Small, deliberate cap - every real payload here (a report, a login,
         # an API-key form post) is a few hundred bytes at most.
-        MAX_CONTENT_LENGTH=64 * 1024,
+        MAX_CONTENT_LENGTH=256 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         # Only force HTTPS-only cookies once the deployment is actually

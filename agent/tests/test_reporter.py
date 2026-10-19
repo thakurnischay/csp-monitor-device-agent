@@ -33,7 +33,7 @@ class BuildPayloadTests(unittest.TestCase):
              mock.patch.object(self.device_health, "list_all_devices", return_value=[]), \
              mock.patch.object(self.device_health, "process_running", return_value={"configured": False, "running": False}):
             payload = self.reporter.build_payload(self.config_store.load())
-        self.assertEqual(payload["schema_version"], 3)
+        self.assertEqual(payload["schema_version"], 4)
         self.assertTrue(payload["agent_version"])
         self.assertTrue(payload["hostname"])
         self.assertTrue(payload["os"])

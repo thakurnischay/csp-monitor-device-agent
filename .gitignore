@@ -23,3 +23,7 @@ Thumbs.db
 # CSP credentials and the zips built from them - never commit
 tools/csp_list.csv
 tools/dist/
+
+# agent local state
+agent/diagnostic_history.json
+agent/impact_map.json

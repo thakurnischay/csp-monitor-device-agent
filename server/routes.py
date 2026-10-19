@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from flask import Blueprint, Response, flash, redirect, render_template, request, session, url_for
 
+import diagnosis
 from db import get_connection
 from device_state import (ONLINE_WINDOW_MIN, NEVER_REPORTED, NOT_REPORTED, OFFLINE, ONLINE, STALE,
                           UNKNOWN, UNVERIFIED, derive_csp_state, derive_device_state)
@@ -77,9 +78,13 @@ def _load_fleet(conn):
     rows = conn.execute("SELECT * FROM csps ORDER BY name, csp_id").fetchall()
     labels = {r["csp_id"]: r["name"] for r in conn.execute(
         "SELECT csp_id, name FROM api_keys").fetchall()}
+    diags = diagnosis.load_all(conn)
     csps = []
     for r in rows:
         d = dict(r)
+        for dev in diagnosis.DEVICES:
+            # None for agents older than 2.0: those keep the earlier status display
+            d[dev + "_diag"] = (diags.get(r["csp_id"]) or {}).get(dev)
         d["state"] = derive_csp_state(r["last_seen"])
         d["online"] = d["state"] == ONLINE
         d["printer_state"] = derive_device_state(
@@ -121,6 +126,11 @@ def _device_problem(c, dev):
     offline and (for the newer devices) from an agent that reports them."""
     if c["devices_unknown"]:
         return False
+    dg = c.get(dev + "_diag")
+    if dg:
+        # root-cause diagnosis (agent 2.0+): confirmed/likely failures with real
+        # impact count; low-severity leads, notes and "unverified" do not
+        return dg["severity"] in diagnosis.BLOCKING and dg["health_state"] not in ("NOT_SET_UP", "UNVERIFIED")
     if dev in ("biometric", "gps") and not c["new_devices_reported"]:
         return False
     return bool(c[dev + "_configured"]) and not c[dev + "_ok"]
@@ -173,6 +183,8 @@ def fleet():
     microatm_problems = sum(1 for c in csps if _device_problem(c, "microatm"))
     biometric_problems = sum(1 for c in csps if _device_problem(c, "biometric"))
     gps_problems = sum(1 for c in csps if _device_problem(c, "gps"))
+    urgent_issues = sum(1 for c in csps if not c["devices_unknown"] for dev in _DEVICES
+                        if (c.get(dev + "_diag") or {}).get("severity") in ("critical", "high"))
     # devices that are plugged in but could not be confirmed to be the right
     # device - not problems, and not OK either; counted so they cannot hide
     unverified_devices = sum(1 for c in csps for dev in _DEVICES
@@ -205,7 +217,7 @@ def fleet():
                           window=ONLINE_WINDOW_MIN, printer_problems=printer_problems,
                           microatm_problems=microatm_problems,
                           biometric_problems=biometric_problems, gps_problems=gps_problems,
-                          unverified_devices=unverified_devices, q=q, status_filter=status_filter,
+                          unverified_devices=unverified_devices, urgent_issues=urgent_issues, q=q, status_filter=status_filter,
                           problems_only=problems_only, sort=sort, direction=direction,
                           page=page, total_pages=total_pages, refresh=refresh,
                           qs=qs, sort_urls=sort_urls, csv_url=csv_url,
@@ -231,11 +243,14 @@ def fleet_csv():
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["csp_id", "name", "status", "printer_state", "microatm_state",
-                     "biometric_state", "gps_state", "last_seen_utc"])
+                     "biometric_state", "gps_state", "last_seen_utc",
+                     "printer_health", "microatm_health", "biometric_health", "gps_health"])
     for c in csps:
         writer.writerow([c["csp_id"], c["name"] or "", c["state"],
                          c["printer_state"], c["microatm_state"],
-                         c["biometric_state"], c["gps_state"], c["last_seen"] or ""])
+                         c["biometric_state"], c["gps_state"], c["last_seen"] or ""]
+                        + [(f"{c[dev + '_diag']['health_state']}/{c[dev + '_diag']['severity']}"
+                            if c.get(dev + "_diag") else "") for dev in _DEVICES])
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=csp_fleet.csv"})
 
@@ -253,6 +268,8 @@ def csp_detail(csp_id):
         past_incidents = conn.execute(
             "SELECT * FROM incidents WHERE csp_id=? AND status='RESOLVED' ORDER BY resolved_at DESC LIMIT 10",
             (csp_id,)).fetchall()
+        diags = diagnosis.load(conn, csp_id)
+        issues = diagnosis.issues_for(conn, csp_id)
     if not c:
         return render_template("not_found.html", csp_id=csp_id), 404
     d = dict(c)
@@ -268,7 +285,10 @@ def csp_detail(csp_id):
             c[dev + "_status"], c[dev + "_verified"])
     if label and (label["name"] or "").strip():
         d["name"] = label["name"].strip()
-    return render_template("csp_detail.html", c=d, events=events,
+    for dev in _DEVICES:
+        d[dev + "_diag"] = diags.get(dev)
+    issues_by_device = {dev: [i for i in issues if i["device"] == dev] for dev in _DEVICES}
+    return render_template("csp_detail.html", c=d, events=events, issues=issues_by_device,
                           open_incidents=open_incidents, past_incidents=past_incidents)
 
 
@@ -298,6 +318,8 @@ def api_keys():
             with get_connection() as conn:
                 conn.execute("DELETE FROM api_keys WHERE csp_id=?", (csp_id,))
                 conn.execute("DELETE FROM csps WHERE csp_id=?", (csp_id,))
+                conn.execute("DELETE FROM device_diagnosis WHERE csp_id=?", (csp_id,))
+                conn.execute("DELETE FROM device_issues WHERE csp_id=?", (csp_id,))
                 record_audit(conn, session.get("admin_login"), "api_key_delete", csp_id)
                 conn.commit()
             flash(f"Removed {csp_id}.")

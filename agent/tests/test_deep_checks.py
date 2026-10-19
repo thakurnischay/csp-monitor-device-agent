@@ -112,7 +112,9 @@ class BiometricRdCheckTests(unittest.TestCase):
 
     def test_nothing_picked_and_no_rd_service_stays_not_set_up(self):
         with self._with_services([]):
-            self.assertEqual(dc.apply_biometric_rd_check(dict(NOTHING_PICKED)), NOTHING_PICKED)
+            out = dc.apply_biometric_rd_check(dict(NOTHING_PICKED))
+        self.assertEqual({k: v for k, v in out.items() if k != "rd"}, NOTHING_PICKED)
+        self.assertEqual(out["rd"], [])            # the probe ran and nothing answered
 
     def test_a_wrong_pick_is_rescued_by_a_ready_rd_service(self):
         """The CSP picked the wrong USB entry, but the scanner does work."""
@@ -128,7 +130,8 @@ class BiometricRdCheckTests(unittest.TestCase):
 
     def test_a_recognised_brand_with_no_rd_service_is_not_flagged(self):
         with self._with_services([]):
-            self.assertEqual(dc.apply_biometric_rd_check(dict(BIO_OK)), BIO_OK)
+            out = dc.apply_biometric_rd_check(dict(BIO_OK))
+        self.assertEqual({k: v for k, v in out.items() if k != "rd"}, BIO_OK)
 
     def test_one_ready_service_among_several_is_enough(self):
         with self._with_services([{"status": "NOTREADY", "info": "", "port": 11100},

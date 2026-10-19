@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request
 
 from db import get_connection
 from device_state import derive_device_state
+import diagnosis
 from events import apply_device_transition, record_event
 from security import report_limiter, verify_api_key
 
@@ -177,6 +178,9 @@ def report():
             "UPDATE csps SET printer_verified=COALESCE(?, printer_verified), "
             "microatm_verified=COALESCE(?, microatm_verified) WHERE csp_id=?",
             (_verified(printer), _verified(microatm), csp_id))
+        # Root-cause diagnosis (agent 2.0+). Devices covered by it get their events/
+        # incidents from the issue history; older agents keep the shallow logic below.
+        diag_handled = diagnosis.store(conn, csp_id, body, now)
         old_printer_state = derive_device_state(
             old["printer_configured"] if old else 0, old["printer_present"] if old else 0,
             old["printer_ok"] if old else 0, old["printer_status"] if old else "",
@@ -184,7 +188,8 @@ def report():
         new_printer_state = derive_device_state(
             _bool(printer, "configured"), new_printer_present, _bool(printer, "ok"), _text(printer, "status"),
             _verified(printer))
-        apply_device_transition(conn, csp_id, "printer", old_printer_state, new_printer_state, _text(printer, "status"))
+        if "printer" not in diag_handled:
+            apply_device_transition(conn, csp_id, "printer", old_printer_state, new_printer_state, _text(printer, "status"))
 
         old_microatm_state = derive_device_state(
             old["microatm_configured"] if old else 0, old["microatm_present"] if old else 0,
@@ -193,7 +198,8 @@ def report():
         new_microatm_state = derive_device_state(
             _bool(microatm, "configured"), new_microatm_present, _bool(microatm, "ok"), _text(microatm, "status"),
             _verified(microatm))
-        apply_device_transition(conn, csp_id, "microatm", old_microatm_state, new_microatm_state, _text(microatm, "status"))
+        if "microatm" not in diag_handled:
+            apply_device_transition(conn, csp_id, "microatm", old_microatm_state, new_microatm_state, _text(microatm, "status"))
 
         # Biometric scanner / GPS dongle (agent schema_version 3+). Only
         # touched when the report actually carries them: an older agent that
@@ -216,7 +222,8 @@ def report():
             new_state = derive_device_state(
                 _bool(d, "configured"), _bool(d, "present"), _bool(d, "ok"), _text(d, "status"),
                 _verified(d))
-            apply_device_transition(conn, csp_id, dev, old_state, new_state, _text(d, "status"))
+            if dev not in diag_handled:
+                apply_device_transition(conn, csp_id, dev, old_state, new_state, _text(d, "status"))
 
         # A test print only "happened" (worth an event) when this report
         # carries a freshly-run result, not the same cached one reported

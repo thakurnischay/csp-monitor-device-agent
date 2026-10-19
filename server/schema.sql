@@ -100,3 +100,41 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
     occurred_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_time ON admin_audit_log(occurred_at DESC);
+
+-- Root-cause diagnosis (agent 2.0+): the CURRENT diagnosis of each device, and
+-- the history of every issue the agent has raised for it.
+CREATE TABLE IF NOT EXISTS device_diagnosis (
+    csp_id          TEXT NOT NULL,
+    device          TEXT NOT NULL,
+    health_state    TEXT NOT NULL,
+    severity        TEXT NOT NULL,
+    summary         TEXT,
+    detail_json     TEXT,
+    last_healthy_at TEXT,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (csp_id, device)
+);
+CREATE TABLE IF NOT EXISTS device_issues (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    csp_id          TEXT NOT NULL,
+    device          TEXT NOT NULL,
+    code            TEXT NOT NULL,
+    state           TEXT,
+    severity        TEXT,
+    title           TEXT,
+    symptom         TEXT,
+    root_cause      TEXT,
+    confidence      TEXT,
+    category        TEXT,
+    evidence_json   TEXT,
+    actions_json    TEXT,
+    operator_action INTEGER NOT NULL DEFAULT 1,
+    auto_fix_json   TEXT,
+    status          TEXT NOT NULL DEFAULT 'OPEN',
+    first_seen      TEXT NOT NULL,
+    last_seen       TEXT NOT NULL,
+    resolved_at     TEXT,
+    occurrences     INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_issues_csp ON device_issues(csp_id, device, status);
+
