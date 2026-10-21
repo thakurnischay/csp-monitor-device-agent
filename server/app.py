@@ -76,6 +76,9 @@ def create_app() -> Flask:
         # Small, deliberate cap - every real payload here (a report, a login,
         # an API-key form post) is a few hundred bytes at most.
         MAX_CONTENT_LENGTH=256 * 1024,
+        # Unique name: on a shared domain (several apps behind one nginx) the default cookie name "session"
+        # would be overwritten by other apps' logins.
+        SESSION_COOKIE_NAME="csp_monitor_session",
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         # Only force HTTPS-only cookies once the deployment is actually

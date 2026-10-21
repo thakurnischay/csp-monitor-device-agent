@@ -35,6 +35,12 @@ class SubPath(RouteTestCase):
         html = self.client.get("/updates").get_data(as_text=True)
         self.assertFalse(any(u.startswith(PREFIX) for u in re.findall(r'(?:href|src|action)="(/[^"]*)"', html)))
 
+    def test_login_cookie_has_its_own_name_so_other_apps_on_the_domain_cannot_clash(self):
+        r = self._login()
+        cookies = r.headers.getlist("Set-Cookie")
+        self.assertTrue(any(c.startswith("csp_monitor_session=") for c in cookies), cookies)
+        self.assertFalse(any(c.startswith("session=") for c in cookies), cookies)
+
     def test_agent_api_works_through_the_prefix(self):
         key = issue_test_key("SUB-1", "Sub CSP")
         r = self.client.post("/api/report", json={"csp_id": "SUB-1", "agent_version": "2.0.0"},
