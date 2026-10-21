@@ -398,6 +398,42 @@ def collect_jobs():
     return [j for j in dh._as_list(data) if isinstance(j, dict)]       # [] = no jobs (valid)
 
 
+# Vendor software that drives the micro-ATM. Read-only watch: is it running, did Windows record it crashing or hanging.
+# (Application Error = event 1000, Application Hang = 1002.) Only ever reported if it is installed on this PC.
+MICROATM_SOFTWARE = ({"name": "Ingenico LLT", "process": "jLLT", "image": "jLLT.exe",
+                      "paths": (r"Ingenico\LLT\jLLT.exe",)},)
+SOFTWARE_LOOKBACK_DAYS = 7
+SOFTWARE_UNSTABLE_CRASHES = 3          # crashes/hangs within the look-back = "keeps crashing"
+
+
+def collect_software():
+    """[{name, process, installed, running, started, crashes:[{id, t}]}] for the watched vendor software.
+    None if Windows could not be asked at all (different from "asked, nothing found")."""
+    out = []
+    for sw in MICROATM_SOFTWARE:
+        proc, image = sw["process"], sw["image"]
+        if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,60}", proc) or not re.fullmatch(r"[A-Za-z0-9_.\-]{1,60}", image):
+            continue                                    # names are constants; this only guards a future edit
+        paths = ";".join(sw["paths"])
+        script = (
+            "$p=@(Get-Process -Name '" + proc + "' -ErrorAction SilentlyContinue | ForEach-Object { try { $_.StartTime.ToString('o') } catch { '' } });"
+            "$inst=$false; foreach($rel in '" + paths + "'.Split(';')) { foreach($base in ${env:ProgramFiles(x86)},$env:ProgramFiles) "
+            "{ if($base -and (Test-Path (Join-Path $base $rel))) { $inst=$true } } };"
+            "$s=(Get-Date).AddDays(-" + str(SOFTWARE_LOOKBACK_DAYS) + ");"
+            "$e=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=$s;Id=1000,1002} -MaxEvents 500 -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.Message -like '*" + image + "*' } | ForEach-Object { [pscustomobject]@{I=$_.Id;T=$_.TimeCreated.ToString('o')} });"
+            "[pscustomobject]@{running=($p.Count -gt 0);started=@($p);installed=$inst;events=@($e)} | ConvertTo-Json -Compress -Depth 4")
+        data = _ps(script, 60)
+        if not isinstance(data, dict):
+            return None
+        out.append({"name": sw["name"], "process": proc, "installed": bool(data.get("installed")),
+                    "running": bool(data.get("running")),
+                    "started": [_parse_time(t) for t in dh._as_list(data.get("started")) if t],
+                    "crashes": [{"id": e.get("I"), "t": _parse_time(e.get("T"))}
+                                for e in dh._as_list(data.get("events")) if isinstance(e, dict)]})
+    return out
+
+
 def collect():
     """All evidence, gathered in parallel. A source that failed is None, which
     is different from "checked and found nothing" ([]) - the rules rely on it."""
@@ -405,7 +441,8 @@ def collect():
             "drivers": lambda: _cached("drivers", 6 * 3600, collect_drivers),
             "events": lambda: _cached("events", 600, collect_events),
             "printers": lambda: _cached("printers", 30, collect_printers),
-            "jobs": lambda: _cached("jobs", 30, collect_jobs)}
+            "jobs": lambda: _cached("jobs", 30, collect_jobs),
+            "software": lambda: _cached("software", 120, collect_software)}
     out = {}
     threads = []
 
@@ -791,6 +828,62 @@ def _printer_findings(status, ctx, row, notes):
     return out
 
 
+def _software_findings(ctx):
+    """Micro-ATM vendor software (e.g. Ingenico LLT): report crashes/hangs the Windows event log recorded.
+    Report-only: "not running" is information, never a fault (the software may simply not be in use), and nothing is
+    ever restarted automatically (it could interrupt a customer's transaction).
+    -> (findings, notes, checked). Silent when the evidence is missing or the software is not on this PC."""
+    programs = ctx["evidence"].get("software")
+    now = ctx["now"]
+    findings, notes, checked = [], [], []
+    for p in programs or []:
+        if not (p.get("installed") or p.get("running") or p.get("crashes")):
+            continue                                              # not a PC that uses it: say nothing
+        label = p["name"]
+        checked.append(f"Whether {label} is open, and whether Windows recorded it crashing or hanging in the last "
+                       f"{SOFTWARE_LOOKBACK_DAYS} days (read-only)")
+        crashes = [c for c in p.get("crashes", []) if c.get("t")]
+        recent = [c for c in crashes if c["t"] >= now - timedelta(hours=24)]
+        last = max((c["t"] for c in crashes), default=None)
+        n_crash = sum(1 for c in crashes if c.get("id") == 1000)
+        n_hang = sum(1 for c in crashes if c.get("id") == 1002)
+        evidence = [f"Windows recorded {n_crash} crash(es) and {n_hang} hang(s) of {label} in the last {SOFTWARE_LOOKBACK_DAYS} days",
+                    f"The most recent was {_ago(last, now)}" if last else "",
+                    f"{label} is open right now" if p.get("running") else f"{label} is not open right now"]
+        if len(crashes) >= SOFTWARE_UNSTABLE_CRASHES:
+            f = finding(
+                "SOFTWARE_UNSTABLE", "microatm", "SOFTWARE_ISSUE", f"The micro-ATM software ({label}) keeps crashing",
+                f"{label} stopped unexpectedly {len(crashes)} times in {SOFTWARE_LOOKBACK_DAYS} days, so micro-ATM transactions may fail.",
+                "The program itself is unstable (a damaged install, a conflict with other software, or a problem underneath it). "
+                "The device is not the cause: Windows still sees it.",
+                "confirmed", evidence,
+                ["Restart the PC once, then open the software again and check it stays open.",
+                 "Do not repeat a payment if one was in progress when it crashed: check its status first.",
+                 f"If it still crashes, repair or reinstall {label} from the official SBI / Ingenico package only (not copies from unknown sources).",
+                 "Tell the support team the crash times listed above."],
+                category="software")
+            f["min_severity"] = "medium"
+            findings.append(f)
+        elif recent:
+            f = finding(
+                "SOFTWARE_CRASHED", "microatm", "SOFTWARE_ISSUE", f"The micro-ATM software ({label}) crashed recently",
+                f"{label} stopped unexpectedly in the last 24 hours.",
+                "Windows recorded the program crashing or freezing. A single crash is often a one-off.",
+                "confirmed", evidence,
+                [f"Open {label} again from its desktop shortcut and wait for it to finish starting before the next transaction.",
+                 "Do not repeat a payment if one was in progress when it crashed: check its status first.",
+                 "If it crashes again, the agent will flag it as unstable."],
+                category="software")
+            f["min_severity"] = "low" if p.get("running") else "medium"
+            findings.append(f)
+        elif crashes:
+            notes.append(f"{label} crashed or hung {len(crashes)} time(s) in the last {SOFTWARE_LOOKBACK_DAYS} days "
+                         f"(last {_ago(last, now)}); none in the last 24 hours.")
+        if not findings and not p.get("running"):
+            notes.append(f"{label} is not open right now (normal if it is not being used).")
+    return findings, notes, checked
+
+
 def _not_connected(dev, ctx):
     hist, now = ctx["history"], ctx["now"]
     last = hist.last_present(dev)
@@ -852,8 +945,17 @@ def diagnose_device(dev, status, ctx):
         if present and ev.get(source) is None and dev in ("biometric", "microatm", "printer"):
             not_checked.append(text)
 
+    if dev == "microatm":
+        sw_findings, sw_notes, sw_checked = _software_findings(ctx)
+        findings = list(findings) + sw_findings
+        notes = list(notes) + sw_notes
+        checked += sw_checked
+
     for f in findings:
         f["severity"] = severity_for(f, impact)
+        floor = f.pop("min_severity", None)
+        if floor in SEVERITY_ORDER and SEVERITY_ORDER[floor] < SEVERITY_ORDER[f["severity"]]:
+            f["severity"] = floor                            # e.g. a crashed banking program is never just "low"
         f.pop("was_recently_present", None)
     findings.sort(key=lambda f: (SEVERITY_ORDER[f["severity"]],
                                  STATE_PRIORITY.index(f["state"]) if f["state"] in STATE_PRIORITY else 99))
@@ -891,7 +993,7 @@ def analyze(health, cfg, functional=None, history=None, evidence=None, impact=No
     try:
         evidence = evidence if evidence is not None else collect()
     except Exception:
-        evidence = {"services": None, "drivers": None, "events": None, "printers": None, "jobs": None}
+        evidence = {"services": None, "drivers": None, "events": None, "printers": None, "jobs": None, "software": None}
     impact = impact or impact_map.load()
     functional = functional or {}
     if functional.get("ran") and cfg is not None:

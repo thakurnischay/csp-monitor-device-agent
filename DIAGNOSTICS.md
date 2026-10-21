@@ -100,6 +100,28 @@ purchase.
 | Automatic driver reinstall / software repair | deliberately not automatic: needs the vendor-approved package and operator approval |
 | How GPS is used by the CSP application | operations input (stays "impact not established" until given) |
 
+## 3b. Micro-ATM software watch (agent 2.1.0)
+
+A micro-ATM can be plugged in and healthy while the vendor program that drives it (currently **Ingenico LLT**, process `jLLT`,
+`C:\Program Files (x86)\Ingenico\LLT\jLLT.exe`) has crashed. The agent therefore also reads, **read-only**:
+
+* whether the program is installed and open, and
+* whether Windows recorded it crashing (Application Error, event 1000) or hanging (event 1002) in the last 7 days.
+
+| Situation | Result |
+|---|---|
+| Not installed on this PC | Nothing is said about it |
+| Installed, open or closed, no crashes | No finding (closed is only a note: "normal if not in use") |
+| Crashed/hung in the last 24 h | `SOFTWARE_CRASHED` (state SOFTWARE_ISSUE): *low* if it is open again, *medium* if it is closed |
+| 3 or more crashes/hangs in 7 days | `SOFTWARE_UNSTABLE`: at least *medium* |
+| Older crashes only | A note, no finding |
+
+Report-only by design: the agent never restarts the program (it could interrupt a customer's transaction) and the finding
+carries no automatic fix. The steps tell the operator not to repeat a payment that was in progress and to repair/reinstall only
+from the official SBI / Ingenico package. It does **not** use the older per-CSP `software_process` setting, which marks the
+device unhealthy whenever the program is closed. The watched program list is `MICROATM_SOFTWARE` in `agent/diagnostics.py`.
+Not covered: crashes that leave no Windows event (e.g. the program exits cleanly by itself), and what happens inside the program.
+
 ## 4. Safety
 
 * Read-only diagnostics only. No live financial transaction, no fingerprint or
