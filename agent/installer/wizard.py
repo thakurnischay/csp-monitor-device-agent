@@ -12,7 +12,35 @@ from tkinter import ttk, messagebox
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import installer_core as ic  # noqa: E402
+
+
+def fatal(message, detail=""):
+    """Setup runs without a console window, so any startup failure must be shown to the person and saved to a file."""
+    import tempfile
+    path = os.path.join(tempfile.gettempdir(), "csp_setup_error.log")
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(message + "\n" + detail + "\n")
+    except OSError:
+        pass
+    if not os.environ.get("CSP_SETUP_NO_DIALOG"):
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("CSP Device Monitor - Setup", "%s\n\nA technical note was saved to:\n%s" % (message, path))
+            root.destroy()
+        except Exception:
+            pass
+    return path
+
+
+try:
+    import installer_core as ic  # noqa: E402
+except Exception as _e:                      # e.g. a missing Python package
+    import traceback
+    fatal("Setup could not start (%s). Please run SETUP.bat again; if it keeps happening, send the saved note to your administrator." % type(_e).__name__,
+          traceback.format_exc())
+    sys.exit(1)
 
 try:                                   # sharp text on scaled displays, and correct window coordinates for screenshots
     import ctypes
@@ -344,7 +372,12 @@ def main(argv):
         app.destroy()
         print("wizard self-test OK (%d screens)" % len(SCREENS))
         return 0
-    Wizard().mainloop()
+    try:
+        Wizard().mainloop()
+    except Exception as e:
+        import traceback
+        fatal("Setup stopped unexpectedly (%s). Nothing was damaged; please run SETUP.bat again." % type(e).__name__, traceback.format_exc())
+        return 1
     return 0
 
 

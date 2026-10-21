@@ -47,5 +47,39 @@ class Imports(unittest.TestCase):
         self.assertEqual(self.local_modules(make_csp_zips.AGENT_FILES), set())
 
 
+class SetupBat(unittest.TestCase):
+    """SETUP.bat must install the monitor's packages BEFORE the window opens (a bare Python used to make the window
+    crash silently), use Windows line endings, and never swallow failures without a message."""
+    def setUp(self):
+        self.raw = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agent", "SETUP.bat"), "rb").read()
+        self.text = self.raw.decode("ascii")
+
+    def test_windows_line_endings_only(self):
+        self.assertNotIn(b"\n", self.raw.replace(b"\r\n", b""))
+
+    def test_packages_are_installed_before_the_wizard_starts(self):
+        self.assertLess(self.text.index("pip install"), self.text.index('start "" "'))
+        self.assertIn("import flask, requests", self.text)
+
+    def test_every_failure_path_pauses_so_the_person_can_read_it(self):
+        import re
+        for m in re.finditer(r"exit /b 1", self.text):
+            self.assertIn("pause", self.text[max(0, m.start() - 120):m.start()])
+
+
+class WizardStartupFailure(unittest.TestCase):
+    def test_a_missing_package_is_reported_not_silent(self):
+        import subprocess
+        agent = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agent", "installer")
+        code = ("import sys; sys.modules['requests']=None; import runpy; sys.argv=['wizard.py']; "
+                "runpy.run_path(r'%s', run_name='__main__')" % os.path.join(agent, "wizard.py"))
+        env = dict(os.environ, CSP_SETUP_NO_DIALOG="1", TEMP=tempfile.mkdtemp(), TMP=tempfile.mkdtemp())
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(r.returncode, 1)
+        log = os.path.join(env["TEMP"], "csp_setup_error.log")
+        self.assertTrue(os.path.isfile(log))
+        self.assertIn("Setup could not start", open(log, encoding="utf-8").read())
+
+
 if __name__ == "__main__":
     unittest.main()
