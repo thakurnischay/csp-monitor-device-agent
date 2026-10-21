@@ -243,5 +243,5 @@ def software_page():
     with get_connection() as conn:
         reqs = software.requirements(conn)
         rows, totals = software.fleet(conn)
-    return render_template("software.html", known=software.KNOWN, reqs=reqs, rows=rows, totals=totals,
-                           labels=software.VERDICT_LABELS)
+    return render_template("software.html", programs=software.PROGRAMS, device_titles=software.DEVICE_TITLES, reqs=reqs,
+                           rows=rows, totals=totals, labels=software.VERDICT_LABELS)

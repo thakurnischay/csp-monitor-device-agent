@@ -271,8 +271,9 @@ def csp_detail(csp_id):
             (csp_id,)).fetchall()
         diags = diagnosis.load(conn, csp_id)
         issues = diagnosis.issues_for(conn, csp_id)
-        sw_items = software.annotate(software.clean_inventory(((diags.get("microatm") or {}).get("detail") or {}).get("software")),
-                                     software.requirements(conn))
+        reqs = software.requirements(conn)
+        sw_items = {dev: software.annotate(software.clean_inventory(((diags.get(dev) or {}).get("detail") or {}).get("software"), dev), reqs)
+                    for dev in software.DEVICE_TITLES}
     if not c:
         return render_template("not_found.html", csp_id=csp_id), 404
     d = dict(c)
@@ -292,7 +293,7 @@ def csp_detail(csp_id):
         d[dev + "_diag"] = diags.get(dev)
     issues_by_device = {dev: [i for i in issues if i["device"] == dev] for dev in _DEVICES}
     return render_template("csp_detail.html", c=d, events=events, issues=issues_by_device, sw_items=sw_items,
-                           sw_labels=software.VERDICT_LABELS,
+                           sw_labels=software.VERDICT_LABELS, sw_titles=software.DEVICE_TITLES,
                           open_incidents=open_incidents, past_incidents=past_incidents)
 
 

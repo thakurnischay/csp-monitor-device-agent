@@ -120,11 +120,11 @@
   <span class="note">{{ c[dev ~ '_status'] or '' }}</span>{% endif %}
 </div>
 {% endif %}
-{% if dev == 'microatm' and sw_items %}
+{% if sw_items.get(dev) %}
 <div class="panel">
-  <h2 style="font-size:1.05rem">Micro-ATM software</h2>
+  <h2 style="font-size:1.05rem">{{ sw_titles[dev] }}</h2>
   <table><thead><tr><th>Software</th><th>Installed</th><th>Required</th><th>Status</th><th>Open now</th><th>Crashes (24 h / 7 days)</th></tr></thead><tbody>
-  {% for p in sw_items %}
+  {% for p in sw_items[dev] %}
     <tr><td>{{ p.name }}</td>
       <td>{% if p.installed %}{{ p.version or 'version unknown' }}{% else %}<span class="note">not installed</span>{% endif %}</td>
       <td>{{ p.required or '-' }}</td>
@@ -133,7 +133,7 @@
       <td>{% if p.key == 'llt' %}{{ p.crashes_24h }} / {{ p.crashes_7d }}{% if p.last_crash_at %}<div class="note">last {{ p.last_crash_at | relative_time }}</div>{% endif %}{% else %}<span class="note">n/a</span>{% endif %}</td></tr>
   {% endfor %}
   </tbody></table>
-  <p class="note">Versions are read from this PC's installed programs. The required version is set on the <a href="{{ url_for('ui.software_page') }}">Software</a> page. The version of the application inside the terminal itself cannot be read from the PC.</p>
+  <p class="note">Versions are read from this PC's installed programs. The required version is set on the <a href="{{ url_for('ui.software_page') }}">Software</a> page. The version of anything stored inside the device itself (for example the application loaded into a micro-ATM terminal) cannot be read from the PC.</p>
 </div>
 {% endif %}
 {% endfor %}

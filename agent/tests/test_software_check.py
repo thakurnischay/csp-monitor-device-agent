@@ -120,8 +120,8 @@ class Collector(unittest.TestCase):
         reply = {"running": False, "started": [], "installed": True, "version": "3.12", "source": "installed programs", "events": []}
         with mock.patch.object(dg, "_ps", return_value=reply):
             out = dg.collect_software()
-        self.assertEqual([p["key"] for p in out], ["llt", "usb_drivers"])
-        self.assertEqual([p["version"] for p in out], ["3.12", "3.12"])
+        self.assertEqual([p["key"] for p in out], ["llt", "usb_drivers", "gps_driver", "morpho_rd"])
+        self.assertEqual([p["version"] for p in out], ["3.12"] * 4)
 
     def test_the_driver_query_has_no_process_or_crash_part(self):
         script = dg._software_script(dg.MICROATM_SOFTWARE[1])
@@ -196,6 +196,71 @@ class Inventory(Base):
         out = self.run_dx(health(microatm=status("microatm", row("Ingenico Tetra", ATM, maker="Ingenico"))), evidence(llt(), usb_drivers()))
         for dev in ("printer", "biometric", "gps"):
             self.assertNotIn("software", out[dev])
+
+
+CH340 = r"USB\VID_1A86&PID_7523\5&BBBB&0&2"
+MORPHO = r"USB\VID_079B&PID_0047\5&CCCC&0&3"
+
+
+def gps_driver(version="3.8.2023.2", installed=True):
+    return {"key": "gps_driver", "name": "GPS dongle driver (WCH CH341)", "process": "", "installed": installed,
+            "version": version if installed else "", "source": "driver file" if installed else "", "running": False, "started": [], "crashes": []}
+
+
+def morpho_rd(version="5.0.0.10", installed=True):
+    return {"key": "morpho_rd", "name": "Morpho / IDEMIA RD Service", "process": "", "installed": installed,
+            "version": version if installed else "", "source": "service program" if installed else "", "running": installed, "started": [], "crashes": []}
+
+
+class GpsAndBiometricInventory(Base):
+    """GPS dongle driver and the fingerprint scanner's RD service are watched the same way: facts out, server judges."""
+    def gps(self, programs, name="USB-SERIAL CH340 (COM3)", maker="wch.cn", instance=CH340):
+        r = row(name, instance, maker=maker)
+        return self.run_dx(health(gps=status("gps", r)), evidence(*programs))["gps"]
+
+    def bio(self, programs, name="MorphoSmart MSO 1300", maker="Morpho", instance=MORPHO, **extra):
+        r = row(name, instance, maker=maker)
+        return self.run_dx(health(biometric=status("biometric", r, **extra)), evidence(*programs))["biometric"]
+
+    def test_the_gps_driver_version_is_reported_for_a_ch340_dongle(self):
+        d = self.gps([gps_driver("3.8.2023.2"), llt(), usb_drivers()])
+        self.assertEqual([p["key"] for p in d["software"]], ["gps_driver"])                  # only this device's software
+        p = d["software"][0]
+        self.assertEqual((p["installed"], p["version"], p["expected"], p["running"]), (True, "3.8.2023.2", True, None))
+
+    def test_a_gps_dongle_with_a_different_chip_is_not_expected_to_have_the_ch340_driver(self):
+        d = self.gps([gps_driver(installed=False)], name="u-blox 7 GPS", maker="u-blox AG", instance=r"USB\VID_1546&PID_01A7\1")
+        self.assertFalse(d["software"][0]["expected"])
+
+    def test_a_missing_gps_driver_is_reported_as_not_installed(self):
+        p = self.gps([gps_driver(installed=False)])["software"][0]
+        self.assertEqual((p["installed"], p["version"], p["expected"]), (False, "", True))
+
+    def test_the_morpho_rd_service_version_and_running_state(self):
+        p = self.bio([morpho_rd("5.0.0.10")])["software"][0]
+        self.assertEqual((p["key"], p["installed"], p["version"], p["running"], p["expected"]), ("morpho_rd", True, "5.0.0.10", True, True))
+
+    def test_a_rd_service_that_answers_counts_as_installed_even_if_the_lookup_missed_it(self):
+        answered = [{"status": "READY", "info": "Morpho_RD_Service", "port": 11100}]
+        p = self.bio([morpho_rd(installed=False)], rd=answered)["software"][0]
+        self.assertEqual((p["installed"], p["running"], p["source"]), (True, True, "RD service answered"))
+
+    def test_a_morpho_scanner_with_no_rd_service_at_all_is_reported_as_not_installed(self):
+        p = self.bio([morpho_rd(installed=False)], rd=[])["software"][0]
+        self.assertEqual((p["installed"], p["expected"]), (False, True))
+
+    def test_other_scanner_makes_are_not_expected_to_have_the_morpho_service(self):
+        p = self.bio([morpho_rd(installed=False)], name="Mantra MFS110", maker="Mantra Softech", instance=r"HID\VID_2C0F&PID_1204\1")["software"][0]
+        self.assertFalse(p["expected"])
+
+    def test_the_morpho_answer_of_another_make_does_not_count(self):
+        answered = [{"status": "READY", "info": "Mantra_RD", "port": 11100}]
+        p = self.bio([morpho_rd(installed=False)], rd=answered)["software"][0]
+        self.assertFalse(p["installed"])
+
+    def test_the_whole_result_is_json_serialisable(self):
+        json.dumps(self.bio([morpho_rd()]))
+        json.dumps(self.gps([gps_driver()]))
 
 
 if __name__ == "__main__":

@@ -95,17 +95,16 @@ def store(conn, csp_id, body, now=None):
         severity = d.get("severity") if d.get("severity") in SEVERITIES else "none"
         findings = [x for x in (clean_finding(f) for f in (d.get("findings") or [])[:6]) if x]
         summary = _s(d.get("summary"), 200)
-        inventory = []
-        if dev == "microatm":
-            # The agent reports facts about the vendor software; the administrator's required versions decide if that is a problem.
-            inventory = software.annotate(software.clean_inventory(d.get("software")), software.requirements(conn))
-            sw_findings = [x for x in (clean_finding(f) for f in software.findings_for(inventory)) if x]
-            findings += sw_findings
-            if sw_findings:
-                order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
-                worst = min(sw_findings, key=lambda f: order[f["severity"]])
-                if state in ("HEALTHY", "UNVERIFIED") or order[worst["severity"]] < order[severity]:
-                    state, severity, summary = "SOFTWARE_ISSUE", worst["severity"], worst["title"]
+        # The agent reports facts about each device's vendor software; the administrator's required versions decide
+        # whether that is a problem (not installed / out of date).
+        inventory = software.annotate(software.clean_inventory(d.get("software"), dev), software.requirements(conn))
+        sw_findings = [x for x in (clean_finding(f) for f in software.findings_for(inventory)) if x]
+        findings += sw_findings
+        if sw_findings:
+            order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
+            worst = min(sw_findings, key=lambda f: order[f["severity"]])
+            if state in ("HEALTHY", "UNVERIFIED") or order[worst["severity"]] < order[severity]:
+                state, severity, summary = "SOFTWARE_ISSUE", worst["severity"], worst["title"]
         detail = {"checked": _list(d.get("checked"), 12, 160), "not_checked": _list(d.get("not_checked"), 8, 240),
                   "notes": _list(d.get("notes"), 6, 240), "impact": _impact(d.get("impact")),
                   "verification": _verification(d.get("verification")),

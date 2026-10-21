@@ -105,7 +105,7 @@ class Stored(RouteTestCase):
 
     def test_the_initial_requirements_come_from_the_supplied_package(self):
         rows = {r["key"]: r["min_version"] for r in self.q("SELECT key, min_version FROM software_requirements")}
-        self.assertEqual(rows, {"llt": "5.2.4", "usb_drivers": "3.12"})
+        self.assertEqual(rows, {"llt": "5.2.4", "usb_drivers": "3.12", "gps_driver": "3.8.2023.2", "morpho_rd": "5.0.0.10"})
 
     def test_seeding_runs_once_and_never_overwrites_an_edit(self):
         with db.get_connection() as conn:
@@ -191,7 +191,7 @@ class SoftwarePage(RouteTestCase):
         page = self.client.get("/software").get_data(as_text=True)
         self.assertLess(page.index("SW-3"), page.index("SW-1"))            # not installed before out of date
         self.assertLess(page.index("SW-1"), page.index("SW-2"))
-        for text in ("Not installed 1", "Out of date 1", "Up to date 1", "Crashed in the last 24 h 1"):
+        for text in ("Not installed 1", "Out of date 1", "Up to date 1", "Ingenico LLT crashed in the last 24 h 1"):
             self.assertIn(text, page)
 
     def test_changing_the_required_version_updates_the_page_immediately(self):
@@ -230,6 +230,101 @@ class SoftwarePage(RouteTestCase):
             self.assertEqual(con.execute("SELECT min_version FROM software_requirements WHERE key='llt'").fetchone()[0], "5.2.4")
         finally:
             con.close()
+
+
+def prog(key, version, installed=True, expected=True, running=None):
+    return {"key": key, "installed": installed, "version": version if installed else "", "source": "driver file", "running": running,
+            "expected": expected, "crashes_7d": 0, "crashes_24h": 0, "last_crash_at": None}
+
+
+def report_dev(device, items, csp="DEV-1", state="HEALTHY", severity="none", summary="No problem found"):
+    body = {"csp_id": csp, "agent_version": "2.2.0", "schema_version": 4,
+            device: {"configured": True, "present": True, "ok": True, "status": "OK"},
+            "diagnosis": {device: {"health_state": state, "severity": severity, "summary": summary, "findings": [],
+                                   "notes": [], "checked": [], "not_checked": [], "software": items}}}
+    return body
+
+
+class OtherDevices(RouteTestCase):
+    """The GPS dongle driver and the fingerprint scanner's RD service are judged exactly like the micro-ATM software."""
+    def setUp(self):
+        super().setUp()
+        self.key = issue_test_key("DEV-1", "Device CSP")
+
+    def q(self, sql, *args):
+        con = sqlite3.connect(self.db_path)
+        con.row_factory = sqlite3.Row
+        try:
+            return con.execute(sql, args).fetchall()
+        finally:
+            con.close()
+
+    def send(self, device, items):
+        r = self.client.post("/api/report", json=report_dev(device, items), headers={"X-API-Key": self.key})
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+
+    def issues(self):
+        return {r["code"]: (r["status"], r["severity"]) for r in self.q("SELECT code, status, severity FROM device_issues WHERE csp_id='DEV-1'")}
+
+    def headline(self, device):
+        r = self.q("SELECT health_state, severity, summary FROM device_diagnosis WHERE csp_id='DEV-1' AND device=?", device)[0]
+        return r["health_state"], r["severity"], r["summary"]
+
+    def test_the_initial_requirements_include_the_gps_driver_and_the_morpho_service(self):
+        reqs = {r["key"]: r["min_version"] for r in self.q("SELECT key, min_version FROM software_requirements")}
+        self.assertEqual((reqs["gps_driver"], reqs["morpho_rd"]), ("3.8.2023.2", "5.0.0.10"))
+
+    def test_a_driver_package_version_written_with_a_date_is_read_correctly(self):
+        self.assertEqual(software.compare("02/11/2023 3.8.2023.02", "3.8.2023.2"), 0)
+        self.assertEqual(software.compare("3.8.2023.2", "3.8.2023.02"), 0)
+        self.assertEqual(software.compare("3.7.2022.1", "3.8.2023.2"), -1)
+
+    def test_gps_driver_not_installed_then_installed(self):
+        self.send("gps", [prog("gps_driver", "", installed=False)])
+        self.assertEqual(self.issues(), {"SOFTWARE_MISSING_GPS_DRIVER": ("OPEN", "high")})
+        state, sev, summary = self.headline("gps")
+        self.assertEqual((state, sev), ("SOFTWARE_ISSUE", "high"))
+        self.assertIn("The GPS dongle driver (GPS dongle driver (WCH CH341)) is not installed", summary)
+        self.send("gps", [prog("gps_driver", "3.8.2023.2")])
+        self.assertEqual(self.issues()["SOFTWARE_MISSING_GPS_DRIVER"][0], "RESOLVED")
+        self.assertEqual(self.headline("gps")[0], "HEALTHY")
+
+    def test_an_old_gps_driver_is_flagged_as_out_of_date(self):
+        self.send("gps", [prog("gps_driver", "3.7.2022.1")])
+        self.assertEqual(self.issues(), {"SOFTWARE_OUTDATED_GPS_DRIVER": ("OPEN", "medium")})
+        self.assertIn("installed 3.7.2022.1, required 3.8.2023.2", self.headline("gps")[2])
+
+    def test_morpho_rd_service_missing_old_and_current(self):
+        self.send("biometric", [prog("morpho_rd", "", installed=False)])
+        self.assertEqual(self.issues(), {"SOFTWARE_MISSING_MORPHO_RD": ("OPEN", "high")})
+        self.assertIn("fingerprint scanner software", self.headline("biometric")[2])
+        self.send("biometric", [prog("morpho_rd", "5.0.0.9", running=True)])
+        self.assertEqual(self.issues()["SOFTWARE_OUTDATED_MORPHO_RD"], ("OPEN", "medium"))
+        self.send("biometric", [prog("morpho_rd", "5.0.0.10", running=True)])
+        self.assertEqual(set(v[0] for v in self.issues().values()), {"RESOLVED"})
+        self.assertEqual(self.headline("biometric")[0], "HEALTHY")
+
+    def test_a_different_make_of_device_is_never_judged(self):
+        self.send("biometric", [prog("morpho_rd", "", installed=False, expected=False)])
+        self.send("gps", [prog("gps_driver", "", installed=False, expected=False)])
+        self.assertEqual(self.issues(), {})
+
+    def test_a_program_attached_to_the_wrong_device_is_dropped(self):
+        self.send("gps", [prog("llt", "", installed=False)])                  # LLT belongs to the micro-ATM, not the GPS
+        self.assertEqual(self.issues(), {})
+
+    def test_the_csp_page_shows_a_software_table_under_each_device_and_the_fleet_page_all_four_programs(self):
+        self.send("gps", [prog("gps_driver", "3.7.2022.1")])
+        self.send("biometric", [prog("morpho_rd", "5.0.0.10", running=True)])
+        self._login()
+        page = self.client.get("/csp/DEV-1").get_data(as_text=True)
+        self.assertIn("GPS dongle software", page)
+        self.assertIn("Fingerprint scanner software", page)
+        self.assertIn("3.7.2022.1", page)
+        fleet = self.client.get("/software").get_data(as_text=True)
+        for name in ("Ingenico LLT", "Ingenico USB Drivers", "GPS dongle driver (WCH CH341)", "Morpho / IDEMIA RD Service"):
+            self.assertIn(name, fleet)
+        self.assertIn("Out of date 1", fleet)
 
 
 if __name__ == "__main__":
