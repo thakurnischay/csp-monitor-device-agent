@@ -1,4 +1,8 @@
 {
-  "_comment": "Public release-signing keys the agent trusts. Empty = the agent will refuse every update. Put the contents produced by `release_tool.py keygen` here.",
-  "keys": []
+  "keys": [
+    {
+      "id": "k20261021",
+      "public": "356d678cd035fc7e0bb40cabba43160924793fd618fab11cb45cfbfbac999c9a"
+    }
+  ]
 }
