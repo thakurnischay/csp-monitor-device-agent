@@ -124,4 +124,6 @@ def setup():
                 ("admin", hash_password("admin123"), _now()))
         _migrate_csps_columns(conn)
         _migrate_api_keys_table(conn)
+        import software
+        software.seed_defaults(conn)
         conn.commit()

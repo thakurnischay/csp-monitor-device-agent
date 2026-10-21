@@ -236,3 +236,15 @@ CREATE TABLE IF NOT EXISTS csp_group_members (
     PRIMARY KEY (group_id, csp_id)
 );
 
+
+-- Required versions of vendor software that drives the micro-ATM (set by an administrator; see software.py).
+-- Rows are never deleted, only deactivated, so the initial values are seeded exactly once.
+CREATE TABLE IF NOT EXISTS software_requirements (
+    key          TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    min_version  TEXT NOT NULL,
+    note         TEXT,
+    active       INTEGER NOT NULL DEFAULT 1,
+    updated_by   TEXT,
+    updated_at   TEXT
+);

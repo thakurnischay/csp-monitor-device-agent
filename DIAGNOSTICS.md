@@ -100,27 +100,42 @@ purchase.
 | Automatic driver reinstall / software repair | deliberately not automatic: needs the vendor-approved package and operator approval |
 | How GPS is used by the CSP application | operations input (stays "impact not established" until given) |
 
-## 3b. Micro-ATM software watch (agent 2.1.0)
+## 3b. Micro-ATM software watch (agent 2.2.0)
 
-A micro-ATM can be plugged in and healthy while the vendor program that drives it (currently **Ingenico LLT**, process `jLLT`,
-`C:\Program Files (x86)\Ingenico\LLT\jLLT.exe`) has crashed. The agent therefore also reads, **read-only**:
+A micro-ATM can be plugged in and healthy while the vendor software behind it is missing, old or crashing. For an
+**Ingenico** micro-ATM (recognised by name/maker or USB vendor id `0B00`) the agent reports **facts**, read-only:
 
-* whether the program is installed and open, and
-* whether Windows recorded it crashing (Application Error, event 1000) or hanging (event 1002) in the last 7 days.
+| Program | Installed / version read from | Open? | Crashes |
+|---|---|---|---|
+| **Ingenico LLT** (`jLLT`, `Program Files (x86)\Ingenico\LLT\jLLT.exe`) | installed programs, else the program file's version | yes/no | Windows events 1000 (crash) and 1002 (hang), 7 days |
+| **Ingenico USB Drivers** | installed programs, else the Windows driver list | n/a | n/a |
+
+The **server decides** what is acceptable, from the *required versions* an administrator sets on the dashboard's **Software**
+page (initial values 5.2.4 and 3.12, from the supplied *Move 2500 LLT USB* package). When a new version is released, change one
+number there: every CSP is judged against it on its next report, and the page itself updates at once, with **no agent update**.
 
 | Situation | Result |
 |---|---|
-| Not installed on this PC | Nothing is said about it |
-| Installed, open or closed, no crashes | No finding (closed is only a note: "normal if not in use") |
-| Crashed/hung in the last 24 h | `SOFTWARE_CRASHED` (state SOFTWARE_ISSUE): *low* if it is open again, *medium* if it is closed |
-| 3 or more crashes/hangs in 7 days | `SOFTWARE_UNSTABLE`: at least *medium* |
-| Older crashes only | A note, no finding |
+| Not an Ingenico micro-ATM, or requirement switched off | Not judged ("Not needed") |
+| Required software **not installed** | issue `SOFTWARE_MISSING_<LLT or USB_DRIVERS>`, severity **high** |
+| Installed **older** than required (versions compared as numbers: 5.10 > 5.9) | `SOFTWARE_OUTDATED_...`, **medium** |
+| Version could not be read | "Version unknown" (shown, never an alarm) |
+| LLT crashed/hung in the last 24 h | `SOFTWARE_CRASHED` (agent-side): *low* if open again, *medium* if closed |
+| 3 or more LLT crashes/hangs in 7 days | `SOFTWARE_UNSTABLE`: at least *medium* |
+| LLT closed, no crashes | A note only ("normal if not in use") - never a fault |
 
-Report-only by design: the agent never restarts the program (it could interrupt a customer's transaction) and the finding
-carries no automatic fix. The steps tell the operator not to repeat a payment that was in progress and to repair/reinstall only
-from the official SBI / Ingenico package. It does **not** use the older per-CSP `software_process` setting, which marks the
-device unhealthy whenever the program is closed. The watched program list is `MICROATM_SOFTWARE` in `agent/diagnostics.py`.
-Not covered: crashes that leave no Windows event (e.g. the program exits cleanly by itself), and what happens inside the program.
+Issues open and close like every other diagnosis (history, "recovery verified"). Each CSP's page has a *Micro-ATM software*
+table, and the **Software** page shows the whole fleet, worst first, with totals.
+
+Report-only by design: nothing is ever restarted, installed or changed by the agent (it could interrupt a customer's
+transaction), and the findings carry no automatic fix. The steps tell the operator not to repeat a payment that was in progress
+and to install only from the official SBI / Ingenico package. The older per-CSP `software_process` setting is **not** used (it
+marks the device unhealthy whenever the program is closed). The watched list is `MICROATM_SOFTWARE` in `agent/diagnostics.py`,
+the known keys and initial versions are in `server/software.py`.
+
+**Not covered:** the version of the application loaded *inside* the terminal (the YONO `.P3A`/`.AGN` packages) - it lives on the
+device and cannot be read from the PC; crashes that leave no Windows event; what happens inside LLT; PeriService / Ingenico_Setup
+(no service or folder was found on the sample PC, so they are not watched).
 
 ## 4. Safety
 

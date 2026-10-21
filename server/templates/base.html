@@ -146,6 +146,7 @@
   <div class="navlinks">
     <a href="{{ url_for('ui.fleet') }}" class="{{ 'active' if request.endpoint == 'ui.fleet' }}">Fleet</a>
     <a href="{{ url_for('ui.agent_updates') }}" class="{{ 'active' if request.endpoint == 'ui.agent_updates' }}">Agent Updates</a>
+    <a href="{{ url_for('ui.software_page') }}" class="{{ 'active' if request.endpoint == 'ui.software_page' }}">Software</a>
     <a href="{{ url_for('ui.enrollments') }}" class="{{ 'active' if request.endpoint == 'ui.enrollments' }}">Enrollments{% if pending_enrollments %} <span class="sev sev-high" style="margin-left:2px">{{ pending_enrollments }}</span>{% endif %}</a>
     <a href="{{ url_for('ui.api_keys') }}" class="{{ 'active' if request.endpoint == 'ui.api_keys' }}">API Keys</a>
     <a href="{{ url_for('ui.audit_log') }}" class="{{ 'active' if request.endpoint == 'ui.audit_log' }}">Audit Log</a>

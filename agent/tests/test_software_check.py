@@ -116,6 +116,24 @@ class Collector(unittest.TestCase):
         with mock.patch.object(dg, "_ps", return_value=None):
             self.assertIsNone(dg.collect_software())
 
+    def test_every_watched_program_is_queried_and_returns_its_version(self):
+        reply = {"running": False, "started": [], "installed": True, "version": "3.12", "source": "installed programs", "events": []}
+        with mock.patch.object(dg, "_ps", return_value=reply):
+            out = dg.collect_software()
+        self.assertEqual([p["key"] for p in out], ["llt", "usb_drivers"])
+        self.assertEqual([p["version"] for p in out], ["3.12", "3.12"])
+
+    def test_the_driver_query_has_no_process_or_crash_part(self):
+        script = dg._software_script(dg.MICROATM_SOFTWARE[1])
+        self.assertNotIn("Get-WinEvent", script)
+        self.assertIn("Win32_PnPSignedDriver", script)
+
+    def test_a_watched_name_with_unsafe_characters_is_never_put_into_a_command(self):
+        bad = dict(dg.MICROATM_SOFTWARE[0], process="x'; Remove-Item C:\ ; '")
+        self.assertIsNone(dg._software_script(bad))
+        bad = dict(dg.MICROATM_SOFTWARE[0], uninstall="a'b")
+        self.assertIsNone(dg._software_script(bad))
+
     def test_the_query_only_reads(self):
         seen = []
         with mock.patch.object(dg, "_ps", side_effect=lambda s, t=45: seen.append(s) or {"running": False, "installed": False, "events": []}):
@@ -124,6 +142,60 @@ class Collector(unittest.TestCase):
         for forbidden in ("Stop-Process", "Start-Process", "Restart-", "Remove-", "Set-", "taskkill"):
             self.assertNotIn(forbidden, script)
         self.assertIn("jLLT", script)
+
+
+def usb_drivers(installed=True, version="3.12"):
+    return {"key": "usb_drivers", "name": "Ingenico USB Drivers", "process": "", "installed": installed,
+            "version": version if installed else "", "source": "installed programs", "running": False, "started": [], "crashes": []}
+
+
+def llt(version="5.2.4", installed=True, **kw):
+    p = program(installed=installed, **kw)
+    p.update(key="llt", version=version if installed else "", source="installed programs")
+    return p
+
+
+class Inventory(Base):
+    """The agent reports FACTS about the software; the server decides whether they are acceptable."""
+    def dx(self, programs, make="Ingenico", name="Ingenico Move 2500", instance=ATM):
+        r = row(name, instance, maker=make)
+        h = health(microatm=status("microatm", r))
+        return self.run_dx(h, evidence(*programs))["microatm"]
+
+    def test_the_inventory_carries_versions_open_state_and_crash_counts(self):
+        d = self.dx([llt("5.2.1", crashes=[(1000, 2), (1002, 50)]), usb_drivers(version="3.10")])
+        by = {p["key"]: p for p in d["software"]}
+        self.assertEqual((by["llt"]["installed"], by["llt"]["version"], by["llt"]["running"]), (True, "5.2.1", True))
+        self.assertEqual((by["llt"]["crashes_24h"], by["llt"]["crashes_7d"]), (1, 2))
+        self.assertTrue(by["llt"]["last_crash_at"])
+        self.assertEqual((by["usb_drivers"]["version"], by["usb_drivers"]["running"]), ("3.10", None))   # a driver is never "open"
+        json.dumps(d)
+
+    def test_it_says_when_the_software_is_not_installed(self):
+        by = {p["key"]: p for p in self.dx([llt(installed=False), usb_drivers(installed=False)])["software"]}
+        self.assertFalse(by["llt"]["installed"])
+        self.assertFalse(by["usb_drivers"]["installed"])
+        self.assertEqual(by["llt"]["version"], "")
+
+    def test_the_software_is_expected_only_for_an_ingenico_micro_atm(self):
+        self.assertTrue(all(p["expected"] for p in self.dx([llt(), usb_drivers()])["software"]))
+        other = self.dx([llt(installed=False)], make="PAX Technology", name="PAX D180", instance=r"USB\VID_1234&PID_0001")
+        self.assertFalse(any(p["expected"] for p in other["software"]))
+
+    def test_an_ingenico_usb_vendor_id_alone_marks_it_expected(self):
+        d = self.dx([llt()], make="", name="USB Device", instance=r"USB\VID_0B00&PID_0071&1")
+        self.assertTrue(all(p["expected"] for p in d["software"]))
+
+    def test_no_inventory_when_windows_could_not_be_asked(self):
+        e = ev()
+        e["software"] = None
+        d = self.run_dx(health(microatm=status("microatm", row("Ingenico Tetra", ATM, maker="Ingenico"))), e)["microatm"]
+        self.assertNotIn("software", d)
+
+    def test_only_the_micro_atm_carries_an_inventory(self):
+        out = self.run_dx(health(microatm=status("microatm", row("Ingenico Tetra", ATM, maker="Ingenico"))), evidence(llt(), usb_drivers()))
+        for dev in ("printer", "biometric", "gps"):
+            self.assertNotIn("software", out[dev])
 
 
 if __name__ == "__main__":

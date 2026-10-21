@@ -398,35 +398,76 @@ def collect_jobs():
     return [j for j in dh._as_list(data) if isinstance(j, dict)]       # [] = no jobs (valid)
 
 
-# Vendor software that drives the micro-ATM. Read-only watch: is it running, did Windows record it crashing or hanging.
-# (Application Error = event 1000, Application Hang = 1002.) Only ever reported if it is installed on this PC.
-MICROATM_SOFTWARE = ({"name": "Ingenico LLT", "process": "jLLT", "image": "jLLT.exe",
-                      "paths": (r"Ingenico\LLT\jLLT.exe",)},)
+# Vendor software that drives the micro-ATM. Read-only inventory: is it installed, which version, is it open, did Windows
+# record it crashing or hanging (Application Error = event 1000, Application Hang = 1002). The agent only reports FACTS;
+# whether a version is "up to date" is decided on the server from the required versions the administrator sets.
+MICROATM_SOFTWARE = (
+    {"key": "llt", "name": "Ingenico LLT", "process": "jLLT", "image": "jLLT.exe",
+     "paths": (r"Ingenico\LLT\jLLT.exe",), "uninstall": r"^LLT( |$)", "pnp_maker": ""},
+    {"key": "usb_drivers", "name": "Ingenico USB Drivers", "process": "", "image": "",
+     "paths": (), "uninstall": r"Ingenico.*USB.*Driver", "pnp_maker": "Ingenico"},
+)
 SOFTWARE_LOOKBACK_DAYS = 7
 SOFTWARE_UNSTABLE_CRASHES = 3          # crashes/hangs within the look-back = "keeps crashing"
+_NAME_OK = re.compile(r"[A-Za-z0-9_.\-]{0,60}")
+_REGEX_OK = re.compile(r"[A-Za-z0-9 .*^$()|+?\\_\-]{1,80}")
+_UNINSTALL_KEYS = ("'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',"
+                   "'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',"
+                   "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'")
+
+
+def _software_script(sw):
+    """One read-only PowerShell query for one watched program. Every value put into it comes from the constants above
+    and is checked against a strict character set first."""
+    proc, image, maker = sw["process"], sw["image"], sw["pnp_maker"]
+    if not (_NAME_OK.fullmatch(proc) and _NAME_OK.fullmatch(image) and _NAME_OK.fullmatch(maker)
+            and _REGEX_OK.fullmatch(sw["uninstall"])):
+        return None
+    paths = ";".join(sw["paths"])
+    parts = [
+        "$inst=$false;$ver='';$src='';",
+        "$u=Get-ItemProperty " + _UNINSTALL_KEYS + " -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.DisplayName -match '" + sw["uninstall"] + "' } | Select-Object -First 1;",
+        "if($u){$inst=$true;$ver=[string]$u.DisplayVersion;$src='installed programs'};",
+    ]
+    if paths:
+        parts.append("foreach($rel in '" + paths + "'.Split(';')) { foreach($base in ${env:ProgramFiles(x86)},$env:ProgramFiles) "
+                     "{ $f=if($base){Join-Path $base $rel}else{''}; if($f -and (Test-Path $f)) { $inst=$true; "
+                     "if(-not $ver){$ver=[string](Get-Item $f).VersionInfo.FileVersion;$src='program file'} } } };")
+    if maker:
+        parts.append("if(-not $inst){$d=Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | "
+                     "Where-Object { $_.Manufacturer -match '" + maker + "' -and $_.DriverVersion } | "
+                     "Sort-Object DriverVersion -Descending | Select-Object -First 1; "
+                     "if($d){$inst=$true;$ver=[string]$d.DriverVersion;$src='Windows driver'}};")
+    if proc:
+        parts.append("$p=@(Get-Process -Name '" + proc + "' -ErrorAction SilentlyContinue | "
+                     "ForEach-Object { try { $_.StartTime.ToString('o') } catch { '' } });")
+    else:
+        parts.append("$p=@();")
+    if image:
+        parts.append("$s=(Get-Date).AddDays(-" + str(SOFTWARE_LOOKBACK_DAYS) + ");"
+                     "$e=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=$s;Id=1000,1002} -MaxEvents 500 -ErrorAction SilentlyContinue | "
+                     "Where-Object { $_.Message -like '*" + image + "*' } | ForEach-Object { [pscustomobject]@{I=$_.Id;T=$_.TimeCreated.ToString('o')} });")
+    else:
+        parts.append("$e=@();")
+    parts.append("[pscustomobject]@{running=($p.Count -gt 0);started=@($p);installed=$inst;version=$ver;source=$src;events=@($e)} "
+                 "| ConvertTo-Json -Compress -Depth 4")
+    return "".join(parts)
 
 
 def collect_software():
-    """[{name, process, installed, running, started, crashes:[{id, t}]}] for the watched vendor software.
+    """[{key, name, process, installed, version, source, running, started, crashes:[{id, t}]}] for the watched software.
     None if Windows could not be asked at all (different from "asked, nothing found")."""
     out = []
     for sw in MICROATM_SOFTWARE:
-        proc, image = sw["process"], sw["image"]
-        if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,60}", proc) or not re.fullmatch(r"[A-Za-z0-9_.\-]{1,60}", image):
+        script = _software_script(sw)
+        if script is None:
             continue                                    # names are constants; this only guards a future edit
-        paths = ";".join(sw["paths"])
-        script = (
-            "$p=@(Get-Process -Name '" + proc + "' -ErrorAction SilentlyContinue | ForEach-Object { try { $_.StartTime.ToString('o') } catch { '' } });"
-            "$inst=$false; foreach($rel in '" + paths + "'.Split(';')) { foreach($base in ${env:ProgramFiles(x86)},$env:ProgramFiles) "
-            "{ if($base -and (Test-Path (Join-Path $base $rel))) { $inst=$true } } };"
-            "$s=(Get-Date).AddDays(-" + str(SOFTWARE_LOOKBACK_DAYS) + ");"
-            "$e=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=$s;Id=1000,1002} -MaxEvents 500 -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.Message -like '*" + image + "*' } | ForEach-Object { [pscustomobject]@{I=$_.Id;T=$_.TimeCreated.ToString('o')} });"
-            "[pscustomobject]@{running=($p.Count -gt 0);started=@($p);installed=$inst;events=@($e)} | ConvertTo-Json -Compress -Depth 4")
         data = _ps(script, 60)
         if not isinstance(data, dict):
             return None
-        out.append({"name": sw["name"], "process": proc, "installed": bool(data.get("installed")),
+        out.append({"key": sw["key"], "name": sw["name"], "process": sw["process"], "installed": bool(data.get("installed")),
+                    "version": str(data.get("version") or "")[:40], "source": str(data.get("source") or "")[:40],
                     "running": bool(data.get("running")),
                     "started": [_parse_time(t) for t in dh._as_list(data.get("started")) if t],
                     "crashes": [{"id": e.get("I"), "t": _parse_time(e.get("T"))}
@@ -837,6 +878,8 @@ def _software_findings(ctx):
     now = ctx["now"]
     findings, notes, checked = [], [], []
     for p in programs or []:
+        if not p.get("process"):
+            continue                                              # e.g. a driver package: versions only, no crash watch
         if not (p.get("installed") or p.get("running") or p.get("crashes")):
             continue                                              # not a PC that uses it: say nothing
         label = p["name"]
@@ -882,6 +925,35 @@ def _software_findings(ctx):
         if not findings and not p.get("running"):
             notes.append(f"{label} is not open right now (normal if it is not being used).")
     return findings, notes, checked
+
+
+def _is_ingenico_micro_atm(status, ctx):
+    """True when the micro-ATM on this PC is an Ingenico terminal (so Ingenico's software is expected here)."""
+    row = status.get("_row") or {}
+    text = " ".join(str(x) for x in (row.get("name"), row.get("manufacturer"), row.get("vendor"), status.get("resolved_name"),
+                                     (ctx.get("cfg") or {}).get("microatm_name"))).lower()
+    inst = str(row.get("instance") or "").upper()
+    return "ingenico" in text or "VID_0B00" in inst
+
+
+def _software_inventory(status, ctx):
+    """What the server needs to judge the micro-ATM software: facts only (installed / version / open / crashes).
+    None when the Windows query did not answer."""
+    programs = ctx["evidence"].get("software")
+    if programs is None:
+        return None
+    now = ctx["now"]
+    expected = _is_ingenico_micro_atm(status, ctx)
+    out = []
+    for p in programs:
+        crashes = [c for c in p.get("crashes", []) if c.get("t")]
+        last = max((c["t"] for c in crashes), default=None)
+        out.append({"key": p.get("key") or "", "name": p.get("name") or "", "installed": bool(p.get("installed")),
+                    "version": p.get("version") or "", "source": p.get("source") or "",
+                    "running": bool(p.get("running")) if p.get("process") else None, "expected": expected,
+                    "crashes_7d": len(crashes), "crashes_24h": sum(1 for c in crashes if c["t"] >= now - timedelta(hours=24)),
+                    "last_crash_at": _iso(last) if last else None})
+    return out
 
 
 def _not_connected(dev, ctx):
@@ -979,11 +1051,17 @@ def diagnose_device(dev, status, ctx):
                         "codes": sorted({r["code"] for r in recovered}),
                         "note": "The earlier problem is gone and the latest checks pass."}
     last_ok = hist.last_healthy(dev)
-    return {"health_state": health_state, "severity": severity, "summary": summary,
+    software = _software_inventory(status, ctx) if dev == "microatm" else None
+    if software is not None:
+        checked.append("Which micro-ATM software is installed and its version (read-only)")
+    result = {"health_state": health_state, "severity": severity, "summary": summary,
             "findings": findings[:8], "notes": [_clip(n, 220) for n in notes][:6],
             "checked": checked, "not_checked": not_checked, "impact": impact,
             "last_healthy_at": _iso(last_ok) if last_ok else None, "verification": verification,
             "actions_taken": hist.actions(dev)[-5:]}
+    if software is not None:
+        result["software"] = software
+    return result
 
 
 def analyze(health, cfg, functional=None, history=None, evidence=None, impact=None, now=None):

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Software - CSP Device Monitor{% endblock %}
+{% block body %}
+<h1>Micro-ATM software</h1>
+<p class="note" style="margin-top:4px">The agent on each CSP reports which Ingenico software is installed, its version, whether it is open and whether it crashed. <strong>You</strong> set the version that is required here. When a new version is released, change the number once and every CSP is checked against it on its next report - no agent update is needed. A CSP whose micro-ATM is not an Ingenico terminal is never judged.</p>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Required versions</h2>
+  <table><thead><tr><th>Software</th><th>Required version (or newer)</th><th>Note</th><th>Active</th><th></th></tr></thead><tbody>
+  {% for key, name in known.items() %}
+    {% set r = reqs.get(key) %}
+    <tr><form method="post" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="key" value="{{ key }}">
+      <td><strong>{{ name }}</strong>{% if r %}<div class="note">last changed {{ r.updated_at | relative_time }} by {{ r.updated_by or '-' }}</div>{% endif %}</td>
+      <td><input name="min_version" value="{{ r.min_version if r else '' }}" size="10" placeholder="e.g. 5.2.4" required pattern="[0-9]+(\.[0-9]+){0,5}"></td>
+      <td><input name="note" value="{{ r.note if r and r.note else '' }}" size="46" maxlength="200"></td>
+      <td><input type="checkbox" name="active" value="1" {% if not r or r.active %}checked{% endif %}></td>
+      <td><button class="btn btn-primary btn-sm" type="submit">Save</button></td>
+    </form></tr>
+  {% endfor %}
+  </tbody></table>
+  <p class="note">Untick <em>Active</em> to stop judging a program (it is then shown as "Not needed"). Versions are compared as numbers (5.10 is newer than 5.9).</p>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">CSP status</h2>
+  <p class="note">
+    <span class="badge badge-green"><span class="dot"></span>Up to date {{ totals.ok }}</span>
+    <span class="badge badge-amber"><span class="dot"></span>Out of date {{ totals.outdated }}</span>
+    <span class="badge badge-red"><span class="dot"></span>Not installed {{ totals.missing }}</span>
+    <span class="badge badge-gray"><span class="dot"></span>Version unknown {{ totals.unknown }}</span>
+    <span class="badge badge-red"><span class="dot"></span>Crashed in the last 24 h {{ totals.crashing }}</span>
+  </p>
+  {% if not rows %}<p class="note">No CSP has reported its micro-ATM software yet. CSPs show up here after their agent is updated to version 2.2.0 or newer.</p>{% else %}
+  <table><thead><tr><th>CSP</th><th>Ingenico LLT</th><th>Ingenico USB Drivers</th><th>LLT crashes (24 h)</th><th>Last report</th></tr></thead><tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="{{ url_for('ui.csp_detail', csp_id=r.csp_id) }}"><strong>{{ r.csp_id }}</strong></a>{% if r.name %}<div class="note">{{ r.name }}</div>{% endif %}</td>
+      {% for key in ['llt', 'usb_drivers'] %}
+        {% set p = r['items'].get(key) %}
+        <td>{% if p %}<span class="badge badge-{{ labels[p.verdict][1] }}"><span class="dot"></span>{{ labels[p.verdict][0] }}</span>
+          <div class="note">{% if p.installed %}installed {{ p.version or '(version unknown)' }}{% else %}not installed{% endif %}{% if p.required %} &middot; required {{ p.required }}{% endif %}{% if key == 'llt' and p.installed %} &middot; {{ 'open' if p.running else 'closed' }}{% endif %}</div>
+          {% else %}<span class="note">-</span>{% endif %}</td>
+      {% endfor %}
+      <td>{% if r.crashes_24h %}<span class="badge badge-red"><span class="dot"></span>{{ r.crashes_24h }}</span>{% else %}<span class="note">0</span>{% endif %}</td>
+      <td class="note">{{ r.updated_at | relative_time }}</td>
+    </tr>
+  {% endfor %}
+  </tbody></table>
+  {% endif %}
+</div>
+{% endblock %}

@@ -8,6 +8,7 @@ import logging
 from flask import flash, redirect, render_template, request, session, url_for
 
 import registry
+import software
 import updates
 from db import get_connection
 from device_state import derive_csp_state
@@ -221,3 +222,26 @@ def enrollments():
         n_reg = conn.execute("SELECT COUNT(*) c FROM csp_registry").fetchone()["c"]
     return render_template("enrollments.html", pending=pending, recent=recent, registry_rows=reg, registry_total=n_reg,
                            norm=registry.normalize_name)
+
+
+# ------------------------------------------------------------------------------------------------ Software
+@ui_bp.route("/software", methods=["GET", "POST"])
+@login_required
+def software_page():
+    admin = _admin()
+    if request.method == "POST":
+        f = request.form
+        with get_connection() as conn:
+            try:
+                software.set_requirement(conn, f.get("key", ""), f.get("min_version", ""), f.get("note", ""),
+                                         bool(f.get("active")), admin)
+                flash("Saved. Every CSP is judged against this the next time it reports (this page already uses it).")
+            except software.SoftwareError as e:
+                flash(str(e))
+            conn.commit()
+        return redirect(url_for("ui.software_page"))
+    with get_connection() as conn:
+        reqs = software.requirements(conn)
+        rows, totals = software.fleet(conn)
+    return render_template("software.html", known=software.KNOWN, reqs=reqs, rows=rows, totals=totals,
+                           labels=software.VERDICT_LABELS)

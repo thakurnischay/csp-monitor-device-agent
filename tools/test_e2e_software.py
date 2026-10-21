@@ -1,0 +1,100 @@
+"""END-TO-END: the agent's real diagnosis code produces the micro-ATM software report; the real server judges it against the
+administrator's required versions and shows it. (Windows queries are replaced by realistic answers; everything else is real.)"""
+import json
+import os
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "agent"))
+sys.path.insert(0, os.path.join(ROOT, "server"))
+
+import diagnostics as dg                                   # noqa: E402  (agent)
+import device_health as dh                                 # noqa: E402
+from tests.test_routes import RouteTestCase                # noqa: E402  (server)
+from tests.helpers import issue_test_key                   # noqa: E402
+
+NOW = datetime(2026, 10, 21, 10, 0, 0, tzinfo=timezone.utc)
+ATM = r"USB\VID_0B00&PID_0071\5&AAAA&0&1"
+
+
+def agent_report(software_evidence, csp="E2E-SW"):
+    """What the agent would send, using its real analysis."""
+    r = dh._enrich_device("Ingenico Move 2500", {"Status": "OK", "Class": "USB", "InstanceId": ATM, "Manufacturer": "Ingenico",
+                                                 "ConfigManagerErrorCode": 0, "ProblemDescription": ""})
+    atm = {"configured": True, "present": True, "ok": True, "status": "OK", "resolved_name": r["name"], "_row": r,
+           "recognised": True, "verified": True}
+    off = {"configured": False, "present": False, "ok": False, "status": "not configured"}
+    health = {"printer": off, "microatm": atm, "biometric": off, "gps": off, "software": {"configured": False, "running": False}}
+    evidence = {"services": [], "drivers": [], "events": [], "printers": [], "jobs": [], "software": software_evidence}
+    hist = dg.History(os.path.join(tempfile.mkdtemp(), "h.json"))
+    diag = dg.analyze(health, {}, None, history=hist, evidence=evidence, now=NOW)
+    body = {"csp_id": csp, "agent_version": "2.1.0", "schema_version": 4,
+            "microatm": {k: v for k, v in atm.items() if not k.startswith("_")}, "diagnosis": diag}
+    return json.loads(json.dumps(body, default=str))           # exactly what travels over the wire
+
+
+def llt(version="5.2.4", installed=True, running=True, crash_hours=()):
+    return {"key": "llt", "name": "Ingenico LLT", "process": "jLLT", "installed": installed, "version": version if installed else "",
+            "source": "installed programs", "running": running, "started": [],
+            "crashes": [{"id": 1000, "t": NOW - timedelta(hours=h)} for h in crash_hours]}
+
+
+def drivers(version="3.12", installed=True):
+    return {"key": "usb_drivers", "name": "Ingenico USB Drivers", "process": "", "installed": installed,
+            "version": version if installed else "", "source": "installed programs", "running": False, "started": [], "crashes": []}
+
+
+class E2E(RouteTestCase):
+    def setUp(self):
+        super().setUp()
+        self.key = issue_test_key("E2E-SW", "E2E Software CSP")
+
+    def send(self, programs):
+        r = self.client.post("/api/report", json=agent_report(programs), headers={"X-API-Key": self.key})
+        self.assertEqual(r.status_code, 200)
+
+    def page(self):
+        self._login()
+        return self.client.get("/csp/E2E-SW").get_data(as_text=True)
+
+    def headline(self):
+        """The micro-ATM's CURRENT one-line summary (the second panel; earlier, resolved issues live in the history section)."""
+        import re
+        return re.findall(r'<p class="diag-summary">(.*?)</p>', self.page(), re.S)[1]
+
+    def test_up_to_date_and_healthy(self):
+        self.send([llt(), drivers()])
+        page = self.page()
+        self.assertIn("Micro-ATM software", page)
+        self.assertEqual(page.count("Up to date"), 2)
+        self.assertEqual(self.headline(), "No problem found by the checks listed below")
+
+    def test_not_installed_out_of_date_and_crashing_are_all_reported(self):
+        self.send([llt(installed=False), drivers(version="3.10")])
+        page = self.page()
+        self.assertIn("The micro-ATM software (Ingenico LLT) is not installed", page)
+        self.assertIn("The micro-ATM software (Ingenico USB Drivers) is out of date (installed 3.10, required 3.12)", page)
+        self.send([llt(version="5.2.4", crash_hours=(1, 5, 30)), drivers()])
+        # both earlier problems are fixed, so only the crash problem is current (the other two move to the history)
+        self.assertEqual(self.headline(), "The micro-ATM software (Ingenico LLT) keeps crashing")
+        self.send([llt(version="5.2.4"), drivers()])
+        self.assertEqual(self.headline(), "No problem found by the checks listed below")
+
+    def test_a_new_llt_release_is_handled_by_changing_one_number_on_the_software_page(self):
+        self.send([llt(version="5.2.4"), drivers()])
+        self.assertNotIn("is out of date", self.headline())
+        import db, software
+        with db.get_connection() as conn:
+            software.set_requirement(conn, "llt", "5.3.0", "LLT 5.3.0 released", True, "admin")
+            conn.commit()
+        self.send([llt(version="5.2.4"), drivers()])                                   # the SAME agent report as before
+        self.assertEqual(self.headline(), "The micro-ATM software (Ingenico LLT) is out of date (installed 5.2.4, required 5.3.0)")
+        self.send([llt(version="5.3.0"), drivers()])                                   # the CSP installs the new LLT
+        self.assertEqual(self.headline(), "No problem found by the checks listed below")
+
+
+if __name__ == "__main__":
+    unittest.main()
