@@ -68,7 +68,9 @@ def create_app() -> Flask:
     # proxy / Tailscale Funnel that terminates TLS) so Flask sees the real
     # originating scheme - needed for SESSION_COOKIE_SECURE below to behave
     # correctly instead of thinking every request is plain HTTP.
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+    # x_prefix: when nginx serves the app under a sub-path (e.g. /csp-device-heartbeat) it strips the prefix and
+    # sends X-Forwarded-Prefix, so every generated link/redirect keeps the prefix. No header = unchanged behaviour.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_prefix=1)
 
     app.config.update(
         # Small, deliberate cap - every real payload here (a report, a login,
