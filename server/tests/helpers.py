@@ -37,8 +37,8 @@ def make_test_app():
     from security import login_limiter, report_limiter
     login_limiter.reset()
     report_limiter.reset()
-    from security import enroll_ip_limiter, enroll_csp_limiter, update_limiter
-    for lim in (enroll_ip_limiter, enroll_csp_limiter, update_limiter):
+    from security import enroll_ip_limiter, enroll_csp_limiter, update_limiter, campaign_test_limiter, campaign_public_limiter, campaign_events_limiter
+    for lim in (enroll_ip_limiter, enroll_csp_limiter, update_limiter, campaign_test_limiter, campaign_public_limiter, campaign_events_limiter):
         lim.reset()
 
     return app_module.create_app(), path

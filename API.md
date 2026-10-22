@@ -89,6 +89,11 @@ A CSP can only touch its **own** deployments. All three are rate-limited (90/min
 
 `/software` (page; save a required version), `/updates` (page), `/updates/upload`, `/updates/action` (approve/revoke release; create/expand/pause/resume/cancel rollout; retry/cancel deployment; create/delete group), `/enrollments` (approve / reject / approve matching / import registry / pre-approve).
 
+## Email Campaigns endpoints
+
+Admin session + CSRF on every POST, like the rest of the dashboard; unauthenticated JSON calls get `401`. Full list, the public tracking / unsubscribe links and the
+provider events endpoint (`POST /api/email-campaigns/events`, header `X-Campaign-Events-Key`, `404` until `CAMPAIGN_EVENTS_KEY` is set) are in `EMAIL_CAMPAIGNS.md` section 6.
+
 ## `GET /api/v1`
 
 Unauthenticated. A trivial "is this the right service" ping.

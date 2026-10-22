@@ -62,6 +62,16 @@
 * **Admin actions** (upload, approve, deploy, rollback, enrollment decisions) are admin-only, CSRF-protected and written to the audit log.
 * **Limitations:** an administrator account with upload + approve rights can deploy any release signed with your key, so protect that key and that account; legacy agents cannot self-update and need the one-time installer; updates are verified over the server's HTTPS but, as with any signed-update scheme, a compromised *signing key* is not recoverable by the server alone (rotate the key list in a signed agent release).
 
+## Email Campaigns (festival / occasion emails)
+
+* **Nothing sends by accident:** dry run is the default; live needs `EMAIL_MODE=live` **and** `CAMPAIGNS_LIVE_ENABLED=1` **and** a typed recipient count; the worker re-checks the switches on every batch.
+* **No duplicates, no resends:** a database uniqueness rule plus an atomic claim; an accepted message is never resent; a message caught mid-send by a restart becomes "unknown outcome" for a human, never automatic.
+* **Opt-outs honoured:** unsubscribe link + RFC 8058 headers on every message; an opted-out or hard-bounced address is never emailed again (checked again right before each send). A GET never unsubscribes.
+* **Honest status:** "accepted by the mail server" is never shown as "delivered"; delivery / bounce only from provider events (shared-secret endpoint, 404 until configured); opens/clicks are labelled signals.
+* **No unsafe content:** templates are plain text with fixed placeholders, everything escaped, header injection prevented, links https-only, the click redirect can only reach the campaign's stored link, the message preview is sandboxed and loads no images.
+* **Credentials** (SMTP password, events key) live only in the server environment; never rendered, logged or stored. Emails are masked in tables and audit entries.
+* The CSP Growth Platform zip included a real `.env`; its values were not copied anywhere. Consider rotating them. Details in `EMAIL_CAMPAIGNS.md` section 13.
+
 ## Reporting a concern
 
 This is an internal Eko tool; raise anything found directly with whoever

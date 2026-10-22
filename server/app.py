@@ -12,6 +12,8 @@ from api_update import update_bp
 from db import setup
 from routes import ui_bp
 import routes_updates  # noqa: F401  (adds the Agent Updates / Enrollments pages to ui_bp)
+import routes_campaigns  # noqa: F401  (adds the Email Campaigns pages and JSON API to ui_bp)
+from campaign_public import public_bp
 from security import get_csrf_token, verify_csrf
 from datetime import datetime, timezone, timedelta
 
@@ -39,6 +41,8 @@ class _Request(Request):
     def max_content_length(self):
         if self.path == "/updates/upload" and self.method == "POST":
             return 64 * 1024 * 1024
+        if self.path == "/email-campaigns/operators/import" and self.method == "POST":
+            return 16 * 1024 * 1024                 # the operator file (csps.json is ~0.5 MB) and optionally state.json
         return self.application_max()
 
     def application_max(self):
@@ -92,6 +96,7 @@ def create_app() -> Flask:
     app.register_blueprint(ui_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(update_bp)
+    app.register_blueprint(public_bp)
 
     app.jinja_env.globals["csrf_token"] = get_csrf_token
 
@@ -107,15 +112,16 @@ def create_app() -> Flask:
     @app.after_request
     def _security_headers(resp):
         resp.headers["X-Content-Type-Options"] = "nosniff"
-        resp.headers["X-Frame-Options"] = "DENY"
+        # setdefault: a route may tighten or (for the sandboxed email preview only) relax these itself
+        resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         # Safe to set script-src 'self' outright: no template anywhere in
         # this app has an inline <script> tag. style-src needs 'unsafe-inline'
         # since the templates use inline style="" attributes throughout.
-        resp.headers["Content-Security-Policy"] = (
+        resp.headers.setdefault("Content-Security-Policy", (
             "default-src 'self'; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; frame-ancestors 'none'"
-        )
+        ))
         return resp
 
     IST = timezone(timedelta(hours=5, minutes=30))
@@ -162,6 +168,13 @@ def create_app() -> Flask:
 _configure_logging()
 setup()
 app = create_app()
+
+# Opt-in background sender for launched / scheduled email campaigns (CSP_MONITOR_CAMPAIGN_WORKER=1). Off by default so tests and
+# one-off scripts that import this module never start a thread. It only ever sends campaigns a person has explicitly launched.
+if os.environ.get("CSP_MONITOR_CAMPAIGN_WORKER") == "1":
+    from campaigns import worker as _campaign_worker
+    from db import get_connection as _get_connection
+    _campaign_worker.start(_get_connection, int(os.environ.get("CAMPAIGN_TICK_SECONDS") or 60))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5100))

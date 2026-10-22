@@ -1,0 +1,10 @@
+Vendored from: Product growth/csp-growth-platform/backend/app/  (CSP Growth Platform)
+Purpose: reuse the SAME ownership rules and SMTP engine; do not edit these files in place.
+If the originals change, re-copy and update this file (the test suite checks the engine's behaviour).
+
+engine.py    verbatim copy
+             original sha256: 061f7b850c17dc5d68fb229d62e1f5e1944210905e6c8739dfbc0485e03d4c69
+emailer.py   verbatim copy
+             original sha256: d200c628aca8113999fc9afa5d10e1ebf427dbe70528b9b56fc569c3f5da5481
+config.py    lines up to the '# form' section only (rules, no bank/form/order constants)
+             original sha256: 3a7d4f8bd4c75f17bc465ea23c778cd2c4ed9517c9c55ae7f4e04422b26871c5

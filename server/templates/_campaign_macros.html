@@ -1,0 +1,18 @@
+{# One place that decides how each message / campaign state is coloured, so the rest of the pages cannot disagree. #}
+{% macro message_badge(label, status_key, delivery) -%}
+  {%- set colour = 'green' if delivery == 'delivered' else 'red' if (status_key == 'failed' or delivery in ('bounced','complained')) else 'amber' if status_key in ('accepted','unknown_outcome') else 'gray' -%}
+  <span class="badge badge-{{ colour }}"><span class="dot"></span>{{ label }}</span>
+{%- endmacro %}
+
+{% macro campaign_badge(status) -%}
+  {%- set colour = 'green' if status == 'completed' else 'red' if status in ('cancelled',) else 'amber' if status in ('paused','scheduled') else 'gray' if status == 'draft' else 'amber' -%}
+  <span class="badge badge-{{ colour }}"><span class="dot"></span>{{ {'draft':'Draft','scheduled':'Scheduled','queued':'Queued','sending':'Sending','paused':'Paused','completed':'Completed','cancelled':'Cancelled'}.get(status, status) }}</span>
+{%- endmacro %}
+
+{% macro mode_badge(mode) -%}
+  {%- if mode == 'live' -%}<span class="badge badge-red"><span class="dot"></span>Live</span>{%- elif mode == 'dry' -%}<span class="badge badge-gray"><span class="dot"></span>Dry run</span>{%- else -%}<span class="note">-</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro device_list(devices, labels) -%}
+  {%- for d in devices %}{{ labels.get(d, d) }}{% if not loop.last %}, {% endif %}{% endfor -%}
+{%- endmacro %}

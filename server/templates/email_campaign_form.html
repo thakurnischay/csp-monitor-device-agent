@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if editing else 'New' }} campaign - CSP Device Monitor{% endblock %}
+{% block body %}
+<p class="note"><a href="{{ url_for('ui.email_campaigns') }}" style="color:var(--accent)">&larr; Email Campaigns</a></p>
+<h1>{{ 'Edit draft campaign' if editing else 'New campaign' }}</h1>
+<p class="note">Saving only stores a draft. <strong>Nothing is sent</strong> until you review the audience, preview the email, run a dry run and then explicitly launch it.</p>
+
+<form method="post" class="panel stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="two-col">
+    <div><label for="name">Campaign name</label><input id="name" name="name" value="{{ form.name }}" maxlength="100" required style="width:100%"></div>
+    <div><label for="occasion">Festival / occasion</label><input id="occasion" name="occasion" value="{{ form.occasion }}" list="occasions" maxlength="80" required style="width:100%">
+      <datalist id="occasions">{% for o in occasions %}<option value="{{ o }}">{% endfor %}</datalist></div>
+  </div>
+  <div><label for="description">Description (for your team)</label><input id="description" name="description" value="{{ form.description }}" maxlength="400" style="width:100%"></div>
+
+  <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px 14px">
+    <legend style="font-size:0.85rem;font-weight:600">Who should receive it: operators who do not have...</legend>
+    {% for k, label in device_labels.items() %}
+      <label style="display:inline-block;margin-right:16px;font-weight:500"><input type="checkbox" name="devices" value="{{ k }}" {{ 'checked' if k in form.devices }}> {{ label }}</label>
+    {% endfor %}
+    <p class="note" style="margin:8px 0 6px">Only operators whose missing device is <strong>confirmed</strong> are included. Unknown or conflicting ownership is never treated as "does not have" - those operators are listed for review instead.</p>
+    <label for="audience_match">Match</label>
+    <select id="audience_match" name="audience_match">
+      <option value="any" {{ 'selected' if form.audience_match == 'any' }}>Lacks at least one of the selected devices</option>
+      <option value="all" {{ 'selected' if form.audience_match == 'all' }}>Lacks every selected device</option>
+    </select>
+    <label style="margin-left:16px;font-weight:500"><input type="checkbox" name="include_dormant" value="1" {{ 'checked' if form.include_dormant }}> Also include dormant operators (active on paper, very few transactions)</label>
+  </fieldset>
+
+  <div><label for="subject">Email subject</label><input id="subject" name="subject" value="{{ form.subject }}" maxlength="150" required style="width:100%"></div>
+  <div><label for="body">Message (plain text; a blank line starts a new paragraph)</label><textarea id="body" name="body" rows="9" maxlength="8000" required>{{ form.body }}</textarea>
+    <p class="note">Placeholders you can use: {% for p in placeholders %}<code>{{ '{' ~ p ~ '}' }}</code> {% endfor %}. <code>{missing_devices}</code> names only the devices confirmed missing for that operator. HTML is not allowed (it would be shown as text).</p></div>
+  <div class="two-col">
+    <div><label for="link_url">Optional button link (https only)</label><input id="link_url" name="link_url" value="{{ form.link_url }}" maxlength="500" placeholder="https://" style="width:100%"></div>
+    <div><label for="link_label">Button text</label><input id="link_label" name="link_label" value="{{ form.link_label }}" maxlength="60" placeholder="Learn more" style="width:100%"></div>
+  </div>
+  <p class="note">Every email also gets an unsubscribe link. Operators who unsubscribe are never emailed again by any campaign.</p>
+  <div><button class="btn btn-primary" type="submit">{{ 'Save changes' if editing else 'Save draft' }}</button>
+    <a class="btn btn-outline" href="{{ url_for('ui.email_campaign', cid=editing.id) if editing else url_for('ui.email_campaigns') }}">Cancel</a></div>
+</form>
+{% endblock %}

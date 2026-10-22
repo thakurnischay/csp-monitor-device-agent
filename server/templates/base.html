@@ -132,6 +132,29 @@
   .conf-confirmed { background: #dcfce7; color: #166534; } .conf-likely { background: #fef3c7; color: #92400e; } .conf-possible { background: #e2e8f0; color: #475569; }
   details.more { margin-top: 10px; font-size: 0.84rem; } details.more summary { cursor: pointer; color: var(--muted); font-weight: 600; }
   @media (max-width: 720px) { .issue dl { grid-template-columns: 1fr; } }
+
+  /* ---------- email campaigns / responsive ---------- */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; margin-bottom: 12px; }
+  .filters label { display: block; font-size: 0.74rem; color: var(--muted); margin-bottom: 3px; }
+  .filters input, .filters select { width: 100%; }
+  .pager { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; font-size: 0.85rem; color: var(--muted); }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 0.88rem; margin-bottom: 14px; border: 1px solid var(--border); }
+  .banner-dry { background: #eef6ff; border-color: #bcd6f5; color: #1e3a5f; }
+  .banner-live { background: #fff1f0; border-color: #f5b5ae; color: #7a1d12; }
+  .tabs { display: flex; gap: 6px; margin: 10px 0 8px; flex-wrap: wrap; }
+  .tabs a { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); font-size: 0.82rem; text-decoration: none; color: var(--ink); background: #fff; }
+  .tabs a.active { background: var(--brand-teal); color: #fff; border-color: var(--brand-teal); }
+  .preview-frame { width: 100%; height: 420px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+  textarea { font-family: inherit; font-size: 0.9rem; padding: 8px 11px; border: 1px solid var(--border); border-radius: 8px; width: 100%; }
+  .stack > * { margin-bottom: 10px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) {
+    nav { height: auto; flex-wrap: wrap; padding: 8px 14px; gap: 6px; }
+    .navlinks { flex-wrap: wrap; height: auto; }
+    .two-col { grid-template-columns: 1fr; }
+    main { padding: 0 12px; }
+  }
 </style>
 </head>
 <body>
@@ -147,6 +170,7 @@
     <a href="{{ url_for('ui.fleet') }}" class="{{ 'active' if request.endpoint == 'ui.fleet' }}">Fleet</a>
     <a href="{{ url_for('ui.agent_updates') }}" class="{{ 'active' if request.endpoint == 'ui.agent_updates' }}">Agent Updates</a>
     <a href="{{ url_for('ui.software_page') }}" class="{{ 'active' if request.endpoint == 'ui.software_page' }}">Software</a>
+    <a href="{{ url_for('ui.email_campaigns') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('ui.email_') }}">Email Campaigns</a>
     <a href="{{ url_for('ui.enrollments') }}" class="{{ 'active' if request.endpoint == 'ui.enrollments' }}">Enrollments{% if pending_enrollments %} <span class="sev sev-high" style="margin-left:2px">{{ pending_enrollments }}</span>{% endif %}</a>
     <a href="{{ url_for('ui.api_keys') }}" class="{{ 'active' if request.endpoint == 'ui.api_keys' }}">API Keys</a>
     <a href="{{ url_for('ui.audit_log') }}" class="{{ 'active' if request.endpoint == 'ui.audit_log' }}">Audit Log</a>
@@ -168,5 +192,6 @@
   {% block body %}{% endblock %}
 </main>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='campaigns.js') }}"></script>
 </body>
 </html>

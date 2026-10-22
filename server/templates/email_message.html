@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_campaign_macros.html" import message_badge, mode_badge %}
+{% block title %}Email to {{ m.csp_code }} - Email Campaigns{% endblock %}
+{% block body %}
+<p class="note"><a href="{{ url_for('ui.email_campaigns') }}" style="color:var(--accent)">&larr; Email Campaigns</a> &middot; <a href="{{ url_for('ui.email_campaign', cid=m.campaign_id) }}" style="color:var(--accent)">{{ m.campaign_name }}</a></p>
+<h1>Email to {{ m.name or m.csp_code }} <span style="font-size:0.9rem">{{ message_badge(m.status, m.status_key, m.delivery_status) }}</span></h1>
+
+<div class="two-col">
+  <div class="panel">
+    <h2 style="font-size:1.05rem">Recipient</h2>
+    <p style="margin:0 0 6px"><strong>CSP code:</strong> {{ m.csp_code }}</p>
+    <p style="margin:0 0 6px"><strong>Operator:</strong> {{ m.name or '-' }}</p>
+    <p style="margin:0 0 6px"><strong>Email at the time of sending:</strong> {{ m.email or '-' }}</p>
+    <p style="margin:0 0 6px"><strong>Location:</strong> {{ m.location or '-' }} &middot; <strong>RM:</strong> {{ m.rm or '-' }}</p>
+    <p style="margin:0 0 6px"><strong>Device ownership:</strong> {{ m.ownership }}</p>
+    <p class="note" style="margin:0">Why this operator was chosen: {{ m.reason }}</p>
+  </div>
+  <div class="panel">
+    <h2 style="font-size:1.05rem">Campaign</h2>
+    <p style="margin:0 0 6px"><strong>{{ m.campaign_name }}</strong> ({{ m.occasion }}) {{ mode_badge(m.mode) }}</p>
+    <p style="margin:0 0 6px"><strong>Subject:</strong> {{ m.subject }}</p>
+    <p class="note" style="margin:0">Launched {{ (m.launched_at | ist) if m.launched_at else '-' }} by {{ m.launched_by or '-' }}</p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">What happened to this email</h2>
+  <table><tbody>
+    <tr><th style="width:230px">Sent to the mail server</th><td>{% if m.accepted_at %}Accepted {{ m.accepted_at | ist }}{% else %}<span class="note">not accepted by the mail server{% if m.status_key in ('queued', 'sending') %} yet{% endif %}</span>{% endif %}</td></tr>
+    <tr><th>Message ID we attached</th><td class="note">{{ m.smtp_message_id or '-' }}</td></tr>
+    <tr><th>Delivery</th><td>{% if m.delivery_status == 'delivered' %}Confirmed delivered {{ (m.delivered_at | ist) if m.delivered_at else '' }}{% elif m.delivery_status in ('bounced', 'complained') %}{{ m.delivery_status | capitalize }}{% else %}<span class="note">Not confirmed. The mail server accepting a message does not prove it reached the inbox; confirmation needs delivery events from the email provider.</span>{% endif %}</td></tr>
+    <tr><th>Opened</th><td>{% if m.open_count %}{{ m.open_count }} time(s), first {{ m.first_open_at | ist }} <span class="note">(a signal only: email apps can load images automatically or block them)</span>{% else %}<span class="note">No open recorded (this does not mean it was not read)</span>{% endif %}</td></tr>
+    <tr><th>Clicked</th><td>{% if m.click_count %}{{ m.click_count }} time(s), first {{ m.first_click_at | ist }}{% else %}<span class="note">No click recorded</span>{% endif %}</td></tr>
+    {% if m.last_error %}<tr><th>Failure information</th><td>{{ m.last_error }}{% if m.failure_kind %} <span class="note">({{ 'permanent: will not be retried' if m.failure_kind == 'permanent' else 'retries used up' }})</span>{% endif %}</td></tr>{% endif %}
+  </tbody></table>
+</div>
+
+<div class="two-col">
+  <div class="panel">
+    <h2 style="font-size:1.05rem">Send attempts and retries</h2>
+    {% if not m.attempts %}<p class="note">No attempts yet.</p>{% else %}
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>Mode</th><th>When</th><th>Result</th><th>Detail</th></tr></thead><tbody>
+    {% for a in m.attempts %}<tr><td>{{ a.attempt_no }}</td><td>{{ a.mode }}</td><td class="note">{{ a.started_at | ist }}</td><td>{{ a.outcome | replace('_', ' ') }}</td><td class="note">{{ a.error or '' }}</td></tr>{% endfor %}
+    </tbody></table></div>{% endif %}
+  </div>
+  <div class="panel">
+    <h2 style="font-size:1.05rem">Events</h2>
+    {% if not m.events %}<p class="note">No events yet.</p>{% else %}
+    <div class="table-wrap"><table><thead><tr><th>Event</th><th>When</th><th>Source</th><th>Detail</th></tr></thead><tbody>
+    {% for e in m.events %}<tr><td>{{ e.kind }}</td><td class="note">{{ e.occurred_at | ist }}</td><td>{{ e.source }}</td><td class="note">{{ e.detail or '' }}</td></tr>{% endfor %}
+    </tbody></table></div>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Eligibility checks recorded for this operator</h2>
+  <div class="table-wrap"><table><thead><tr><th>Check</th><th>Result</th><th>Note</th></tr></thead><tbody>
+  {% for c in m.checks %}<tr><td>{{ c.check }}</td><td>{% if c.passed is none %}-{% elif c.passed %}<span class="badge badge-green"><span class="dot"></span>passed</span>{% else %}<span class="badge badge-red"><span class="dot"></span>failed</span>{% endif %}</td><td class="note">{{ c.note }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Email content</h2>
+  {% if m.body_html %}
+    <iframe class="preview-frame" sandbox="" title="Email as sent" src="{{ url_for('ui.email_message_body', rid=m.id) }}"></iframe>
+    <details><summary class="note">Plain-text version</summary><pre style="white-space:pre-wrap;font-size:0.85rem">{{ m.body_text }}</pre></details>
+    <p class="note">Shown exactly as sent, without loading images, so viewing it here does not count as an open.</p>
+  {% else %}<p class="note">The content is kept once an email has been accepted by the mail server.</p>{% endif %}
+</div>
+{% endblock %}
