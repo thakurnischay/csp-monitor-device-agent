@@ -1,6 +1,6 @@
 """Agent-facing endpoints for enrollment and updates. Outbound-only: agents call these; the server never calls a CSP PC.
 
-    POST /api/enroll/verify   {csp_id, name}                         -> is this a real CSP code + matching name?  (no credentials issued)
+    POST /api/enroll/verify   {csp_id, name}                         -> well-formed, and the name matches if the code is registered? (no credentials issued)
     POST /api/enroll          X-API-Key: <key the agent made>        -> create a PENDING enrollment (or approved if admin pre-approved)
     POST /api/enroll/status   X-API-Key: <that key>, {csp_id}        -> pending / approved / rejected / superseded
     GET  /api/update/manifest ?csp_id=&deployment_id=   X-API-Key    -> signed manifest (exact bytes, base64) + signature
@@ -48,7 +48,7 @@ def enroll_verify():
         return limited
     with get_connection() as conn:
         verdict = registry.verify(conn, csp_id, body.get("name"))
-    ok = verdict in ("ok", "no_name_on_record")
+    ok = verdict in ("ok", "no_name_on_record", "not_registered")
     return jsonify({"ok": ok, "verdict": verdict, "message": registry.MESSAGES[verdict]}), (200 if ok else 400)
 
 

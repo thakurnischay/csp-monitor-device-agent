@@ -70,10 +70,11 @@ class VerifyTests(EnrollBase):
         for name in ("sharma digital seva kendra", "  SHARMA   Digital  Seva Kendra. ", "Sharma Digital Seva Kendra"):
             self.assertEqual(self.verify(name=name).get_json()["verdict"], "ok", name)
 
-    def test_an_unknown_code_is_rejected_with_a_plain_message(self):
-        r = self.verify(code="NOPE-9999")
-        self.assertEqual((r.status_code, r.get_json()["verdict"]), (400, "unknown_code"))
-        self.assertIn("not found", r.get_json()["message"])
+    def test_an_unregistered_code_is_allowed_through_for_the_admin_to_check(self):
+        r = self.verify(code="1A850657", name="Shyam Kumar")
+        self.assertEqual((r.status_code, r.get_json()["verdict"]), (200, "not_registered"))
+        self.assertTrue(r.get_json()["ok"])
+        self.assertIn("administrator", r.get_json()["message"])
 
     def test_a_wrong_name_for_a_real_code_is_a_mismatch(self):
         for name in ("Sharma Digital", "Verma Digital Seva Kendra", "Sharma Digital Seva Kendra Two"):
@@ -99,7 +100,7 @@ class VerifyTests(EnrollBase):
 
     def test_guessing_is_rate_limited(self):
         codes = [self.verify(code="GUESS-%03d" % i).status_code for i in range(30)]
-        self.assertEqual(codes[0], 400)
+        self.assertEqual(codes[0], 200)
         self.assertIn(429, codes)
 
 
@@ -111,10 +112,56 @@ class EnrollmentAuthorization(EnrollBase):
         self.assertEqual(self.heartbeat(key).status_code, 401)                  # code + name alone grant nothing
         self.assertEqual(self.q("SELECT * FROM api_keys WHERE csp_id='CSP-JH-1042'"), [])
 
-    def test_unknown_code_or_wrong_name_cannot_even_request(self):
-        self.assertEqual(self.enroll(code="NOPE-1234")[1].status_code, 404)
+    def test_a_wrong_name_for_a_registered_code_cannot_even_request(self):
         self.assertEqual(self.enroll(name="Somebody Else")[1].status_code, 400)
         self.assertEqual(self.q("SELECT * FROM enrollments"), [])
+
+    def test_an_unregistered_code_creates_a_pending_request_and_the_key_does_not_work_yet(self):
+        key, r = self.enroll(code="1A850657", name="Shyam Kumar")
+        self.assertEqual((r.status_code, r.get_json()["status"]), (200, "pending"))
+        self.assertEqual(self.status(key, "1A850657").get_json()["status"], "pending")
+        self.assertEqual(self.heartbeat(key, "1A850657").status_code, 401)
+        row = self.q("SELECT * FROM enrollments WHERE csp_id='1A850657'")[0]
+        self.assertEqual((row["status"], row["registry_name"], row["replaces_existing"]), ("PENDING", None, 0))
+        self.assertEqual(self.q("SELECT * FROM api_keys WHERE csp_id='1A850657'"), [])
+
+    def test_approving_an_unregistered_csp_activates_its_key_and_registers_it(self):
+        key, _ = self.enroll(code="1A850657", name="Shyam Kumar")
+        self.admin()
+        self.approve_latest()
+        self.assertEqual(self.status(key, "1A850657").get_json()["status"], "approved")
+        self.assertEqual(self.heartbeat(key, "1A850657").status_code, 200)
+        self.assertEqual(self.q("SELECT name, pre_approved FROM csp_registry WHERE csp_id='1A850657'"),
+                         [{"name": "Shyam Kumar", "pre_approved": 0}])
+        # once registered, a later install must type the matching name
+        self.assertEqual(self.verify("1A850657", "Someone Else").get_json()["verdict"], "name_mismatch")
+
+    def test_an_unregistered_csp_is_never_auto_approved(self):
+        self.admin()
+        self.post_admin("/enrollments", action="approve_matching")
+        key, r = self.enroll(code="1A850657", name="Shyam Kumar")
+        self.post_admin("/enrollments", action="approve_matching")
+        self.assertEqual(r.get_json()["status"], "pending")
+        self.assertEqual(self.status(key, "1A850657").get_json()["status"], "pending")
+        self.assertEqual(self.heartbeat(key, "1A850657").status_code, 401)
+
+    def test_an_unregistered_request_is_marked_on_the_enrollments_page(self):
+        self.enroll(code="1A850657", name="Shyam Kumar")
+        self.enroll()                                              # a registered one, for contrast
+        self.admin()
+        html = self.client.get("/enrollments").get_data(as_text=True)
+        self.assertEqual(html.count("Not in registry"), 1)
+        self.assertIn("(not in registry)", html)
+        self.assertIn("Name matches", html)
+
+    def test_rejecting_an_unregistered_csp_leaves_its_key_useless_and_does_not_register_it(self):
+        key, _ = self.enroll(code="1A850657", name="Shyam Kumar")
+        self.admin()
+        eid = self.q("SELECT id FROM enrollments WHERE status='PENDING'")[0]["id"]
+        self.post_admin("/enrollments", action="reject", enrollment_id=eid)
+        self.assertEqual(self.status(key, "1A850657").get_json()["status"], "rejected")
+        self.assertEqual(self.heartbeat(key, "1A850657").status_code, 401)
+        self.assertEqual(self.q("SELECT * FROM csp_registry WHERE csp_id='1A850657'"), [])
 
     def test_an_invalid_key_shape_is_refused(self):
         for key in ("", "short", "x" * 100, "has spaces in the key abcdefghijklmnopqrstuvwxyz"):

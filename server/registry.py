@@ -4,8 +4,9 @@ The problem: a CSP operator should only have to type their CSP name and CSP code
 are not secrets (they appear on screens and in screenshots), so they can never be enough to be handed a
 credential. The design:
 
-  1. The administrator's registry (plus every CSP that already has a key) defines which codes are real
-     and what each CSP is officially called.
+  1. The administrator's registry (plus every CSP that already has a key) records which codes are known
+     and what each CSP is officially called. It is optional: a code that is NOT in it may still ask to
+     enroll - the request is marked "not in registry" for the administrator and is never auto-approved.
   2. The agent generates its OWN random API key on the CSP's PC and sends it with the enrollment request.
      The server stores only the hash - a key is never sent TO the PC, never shown, never typed.
   3. The request waits as PENDING. It becomes usable only when an administrator approves it in the
@@ -53,13 +54,14 @@ def lookup(conn, csp_id):
 
 
 def verify(conn, csp_id, name):
-    """-> 'ok' | 'invalid' | 'unknown_code' | 'name_mismatch' | 'no_name_on_record'."""
+    """-> 'ok' | 'invalid' | 'not_registered' | 'name_mismatch' | 'no_name_on_record'.
+    A code that is not in the registry is allowed through ('not_registered'): the administrator's approval is the gate."""
     csp_id, name = str(csp_id or "").strip(), " ".join(str(name or "").split())
     if not CODE_RE.match(csp_id) or not (2 <= len(name) <= 80):
         return "invalid"
     info = lookup(conn, csp_id)
     if not info["known"]:
-        return "unknown_code"
+        return "not_registered"
     if info["name"] is None:
         return "no_name_on_record"
     return "ok" if normalize_name(name) == normalize_name(info["name"]) else "name_mismatch"
@@ -68,7 +70,7 @@ def verify(conn, csp_id, name):
 MESSAGES = {
     "ok": "Verified.",
     "invalid": "Please enter your CSP name and your CSP code.",
-    "unknown_code": "This CSP code was not found. Please check it, or contact your administrator.",
+    "not_registered": "Verified. Your administrator will check your CSP code and name when approving.",
     "name_mismatch": "The CSP name does not match this CSP code. Please check the spelling, or contact your administrator.",
     "no_name_on_record": "Verified. Your administrator will confirm your name when approving.",
 }
@@ -101,8 +103,8 @@ def request_enrollment(conn, key, csp_id, name, hostname="", machine_id="", agen
     if not KEY_RE.match(str(key or "")):
         return 400, {"ok": False, "status": "invalid", "message": "The agent did not present a valid key."}
     verdict = verify(conn, csp_id, name)
-    if verdict in ("invalid", "unknown_code", "name_mismatch"):
-        return (404 if verdict == "unknown_code" else 400), {"ok": False, "status": verdict, "message": MESSAGES[verdict]}
+    if verdict in ("invalid", "name_mismatch"):
+        return 400, {"ok": False, "status": verdict, "message": MESSAGES[verdict]}
     kh = hash_api_key(key)
     existing = conn.execute("SELECT * FROM enrollments WHERE key_hash=?", (kh,)).fetchone()
     if existing:
@@ -122,7 +124,7 @@ def request_enrollment(conn, key, csp_id, name, hostname="", machine_id="", agen
          str(remote_addr or "")[:60], kh, key_suffix(key), 1 if info["has_agent"] else 0, _now()))
     row = conn.execute("SELECT * FROM enrollments WHERE id=?", (cur.lastrowid,)).fetchone()
     record_audit(conn, "agent", "enrollment_requested", csp_id, "%s from %s" % (name[:60], (hostname or "unknown")[:40]))
-    # administrator pre-approval: only for a brand-new agent whose name matches exactly
+    # administrator pre-approval: only for a REGISTERED brand-new agent whose name matches exactly (never 'not_registered')
     if info["pre_approved"] and verdict == "ok" and not info["has_agent"]:
         _approve_row(conn, row, "pre-approval")
         return 200, {"ok": True, "status": "approved", "request_id": row["id"]}

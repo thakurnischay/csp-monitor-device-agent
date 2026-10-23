@@ -2,7 +2,7 @@
 {% block title %}Enrollments - CSP Device Monitor{% endblock %}
 {% block body %}
 <h1>Enrollments</h1>
-<p class="note" style="margin-top:4px">A CSP operator installs the agent and types only their CSP name and code. The agent creates its own secret key; nothing works until <strong>you</strong> approve the request here (or you pre-approved that CSP in the registry below).</p>
+<p class="note" style="margin-top:4px">A CSP operator installs the agent and types only their CSP name and code. The agent creates its own secret key; nothing works until <strong>you</strong> approve the request here (or you pre-approved that CSP in the registry below). A CSP does not have to be in the registry first: an approved CSP is added to it automatically.</p>
 
 <div class="panel">
   <h2 style="font-size:1.05rem">Waiting for approval ({{ pending | length }})</h2>
@@ -11,10 +11,11 @@
   {% for e in pending %}
     {% set match = e.registry_name and norm(e.registry_name) == norm(e.requested_name) %}
     <tr>
-      <td><strong>{{ e.csp_id }}</strong></td><td>{{ e.requested_name }}</td><td>{{ e.registry_name or '(none on record)' }}</td>
+      <td><strong>{{ e.csp_id }}</strong></td><td>{{ e.requested_name }}</td><td>{{ e.registry_name or ('(not in registry)' if e.csp_id in unregistered else '(none on record)') }}</td>
       <td class="note">{{ e.hostname or '-' }}<br>{{ e.remote_addr or '' }} &middot; agent {{ e.agent_version or '?' }}</td>
       <td class="note">{{ e.created_at | ist }}</td>
       <td>{% if e.replaces_existing %}<span class="badge badge-red"><span class="dot"></span>This CSP already has an agent</span>
+          {% elif e.csp_id in unregistered %}<span class="badge badge-amber"><span class="dot"></span>Not in registry</span><br><span class="note">check the code and name before approving</span>
           {% elif match %}<span class="badge badge-green"><span class="dot"></span>Name matches</span>
           {% else %}<span class="badge badge-amber"><span class="dot"></span>Name not verifiable</span>{% endif %}</td>
       <td>
@@ -34,9 +35,9 @@
 
 <div class="panel">
   <h2 style="font-size:1.05rem">CSP registry ({{ registry_total }})</h2>
-  <p class="note">The list of real CSP codes and their official names. The installer checks what the operator types against it. A CSP that already has an API key counts as registered even if it is not listed here. Importing never overwrites an existing CSP's name unless you tick the box.</p>
+  <p class="note">Optional: CSP codes and their official names. A registered CSP must type a matching name, and can be pre-approved; an unregistered CSP can still enroll but always waits for your approval. A CSP that already has an API key counts as registered even if it is not listed here. Importing never overwrites an existing CSP's name unless you tick the box.</p>
   <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="import_registry">
-    <textarea name="registry_text" rows="4" style="width:100%" placeholder="one per line:  code,name   (optional third column: yes = approve its first enrollment automatically)&#10;CSP-JH-1042,Sharma Digital Seva Kendra"></textarea>
+    <textarea name="registry_text" rows="4" style="width:100%" placeholder="one per line:  code,name   (optional third column: yes = approve its first enrollment automatically)&#10;1A123456,Sample CSP Name   (the code exactly as the operator types it - no extra prefix)"></textarea>
     <label class="note"><input type="checkbox" name="overwrite" value="1"> overwrite names that already exist</label>
     <button class="btn btn-primary btn-sm" type="submit">Import</button></form>
   {% if registry_rows %}

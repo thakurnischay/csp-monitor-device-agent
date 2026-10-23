@@ -220,8 +220,9 @@ def enrollments():
         recent = conn.execute("SELECT * FROM enrollments WHERE status<>'PENDING' ORDER BY id DESC LIMIT 25").fetchall()
         reg = conn.execute("SELECT * FROM csp_registry ORDER BY csp_id LIMIT 500").fetchall()
         n_reg = conn.execute("SELECT COUNT(*) c FROM csp_registry").fetchone()["c"]
+        unregistered = {e["csp_id"] for e in pending if not registry.lookup(conn, e["csp_id"])["known"]}
     return render_template("enrollments.html", pending=pending, recent=recent, registry_rows=reg, registry_total=n_reg,
-                           norm=registry.normalize_name)
+                           norm=registry.normalize_name, unregistered=unregistered)
 
 
 # ------------------------------------------------------------------------------------------------ Software
