@@ -319,6 +319,12 @@ _cache = {}
 _cache_lock = threading.Lock()
 
 
+def clear_cache():
+    """Forget every cached Windows answer, so the next check reads everything fresh ("Report now" after a fix)."""
+    with _cache_lock:
+        _cache.clear()
+
+
 def reset_cache():
     with _cache_lock:
         _cache.clear()
@@ -408,11 +414,14 @@ def collect_jobs():
 #   paths       program files under Program Files;  sysfiles  files under System32 (driver files);  uninstall  installed-programs name
 #   pnp_maker   fallback: the version of the newest Windows driver from this maker
 WATCHED_SOFTWARE = (
-    {"key": "llt", "device": "microatm", "name": "Ingenico LLT", "process": "jLLT", "image": "jLLT.exe",
-     "paths": (r"Ingenico\LLT\jLLT.exe",), "sysfiles": (), "service": "", "uninstall": r"^LLT( |$)", "pnp_maker": "",
+    {"key": "llt", "device": "microatm", "name": "Ingenico LLT", "process": "jLLT", "alt_processes": ("LLT",), "image": "jLLT.exe",
+     "paths": (r"Ingenico\LLT\jLLT.exe", r"Ingenico\LLT\LLT.exe", r"Ingenico\jLLT\jLLT.exe"), "sysfiles": (), "service": "",
+     "uninstall": r"(^| )j?LLT( |$|_|-)|Local.?Loader", "pnp_maker": "",
+     "search": ("Ingenico", "*LLT*.exe"), "inf_provider": "",
      "tokens": ("ingenico",), "vids": ("0B00",)},
     {"key": "usb_drivers", "device": "microatm", "name": "Ingenico USB Drivers", "process": "", "image": "",
-     "paths": (), "sysfiles": (), "service": "", "uninstall": r"Ingenico.*USB.*Driver", "pnp_maker": "Ingenico",
+     "paths": (), "sysfiles": (), "service": "", "uninstall": r"Ingenico.*(USB|Driver)|Telium.*USB", "pnp_maker": "Ingenico",
+     "inf_provider": "Ingenico",
      "tokens": ("ingenico",), "vids": ("0B00",)},
     {"key": "gps_driver", "device": "gps", "name": "GPS dongle driver (WCH CH341)", "process": "", "image": "",
      "paths": (), "sysfiles": (r"drivers\CH341S64.SYS", r"drivers\CH341SER.SYS"), "service": "", "uninstall": "",
@@ -428,6 +437,7 @@ SOFTWARE_UNSTABLE_CRASHES = 3          # crashes/hangs within the look-back = "k
 _NAME_OK = re.compile(r"[A-Za-z0-9_.\-]{0,60}")
 _REGEX_OK = re.compile(r"[A-Za-z0-9 .*^$()|+?\\_\-]{0,80}")
 _PATH_OK = re.compile(r"[A-Za-z0-9_.\\\- ()]{1,80}")
+_GLOB_OK = re.compile(r"[A-Za-z0-9_.*\-]{0,40}")
 _UNINSTALL_KEYS = ("'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',"
                    "'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',"
                    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'")
@@ -437,9 +447,13 @@ def _software_script(sw):
     """One read-only PowerShell query for one watched program. Every value put into it comes from the constants above
     and is checked against a strict character set first."""
     proc, image, maker = sw["process"], sw["image"], sw["pnp_maker"]
+    procs = tuple(p for p in (proc,) + tuple(sw.get("alt_processes", ())) if p)
     svc, unins = sw.get("service", ""), sw["uninstall"]
     paths, sysfiles = tuple(sw["paths"]), tuple(sw.get("sysfiles", ()))
-    if not (_NAME_OK.fullmatch(proc) and _NAME_OK.fullmatch(image) and _NAME_OK.fullmatch(maker)
+    search_dir, search_glob = sw.get("search") or ("", "")
+    inf = sw.get("inf_provider", "")
+    if not (all(_NAME_OK.fullmatch(p) for p in procs) and _NAME_OK.fullmatch(image) and _NAME_OK.fullmatch(maker)
+            and _NAME_OK.fullmatch(inf) and _NAME_OK.fullmatch(search_dir) and _GLOB_OK.fullmatch(search_glob)
             and _REGEX_OK.fullmatch(unins) and _REGEX_OK.fullmatch(svc)
             and all(_PATH_OK.fullmatch(p) for p in paths + sysfiles)):
         return None
@@ -462,13 +476,24 @@ def _software_script(sw):
                      "$m=[regex]::Match([string]$sv.PathName,'^\\s*\"?([^\"]+?\\.exe)');"
                      "if($m.Success -and -not $ver){$fv=[string](Get-Item $m.Groups[1].Value -ErrorAction SilentlyContinue).VersionInfo.FileVersion;"
                      "if($fv){$ver=$fv;$src='service program'}}};")
+    if search_dir and search_glob:                  # the program installed somewhere under the maker's folder
+        parts.append("if(-not $inst){foreach($base in ${env:ProgramFiles(x86)},$env:ProgramFiles,($env:SystemDrive+'\')){ if($base){ "
+                     "$dir=Join-Path $base '" + search_dir + "'; if(Test-Path $dir){ $x=Get-ChildItem -Path $dir -Recurse -Depth 3 "
+                     "-Filter '" + search_glob + "' -ErrorAction SilentlyContinue | Select-Object -First 1; "
+                     "if($x){$inst=$true;$ver=[string]$x.VersionInfo.FileVersion;$src='program file'}}}}};")
+    if inf:                                         # a driver package Windows has installed, even with the device unplugged
+        parts.append("if(-not $inst){$i=Get-ChildItem (Join-Path $env:SystemRoot 'INF\oem*.inf') -ErrorAction SilentlyContinue | "
+                     "Select-String -Pattern '" + inf + "' -List -ErrorAction SilentlyContinue | Select-Object -First 1; "
+                     "if($i){$inst=$true;$src='driver package';$dv=Select-String -Path $i.Path "
+                     "-Pattern 'DriverVer\s*=\s*[^,]*,\s*([0-9.]+)' -ErrorAction SilentlyContinue | Select-Object -First 1; "
+                     "if($dv -and -not $ver){$ver=$dv.Matches[0].Groups[1].Value}}};")
     if maker:
         parts.append("if(-not $inst){$d=Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | "
                      "Where-Object { $_.Manufacturer -match '" + maker + "' -and $_.DriverVersion } | "
                      "Sort-Object DriverVersion -Descending | Select-Object -First 1; "
                      "if($d){$inst=$true;$ver=[string]$d.DriverVersion;$src='Windows driver'}};")
-    if proc:
-        parts.append("$p=@(Get-Process -Name '" + proc + "' -ErrorAction SilentlyContinue | "
+    if procs:
+        parts.append("$p=@(Get-Process -Name " + ",".join("'" + p + "'" for p in procs) + " -ErrorAction SilentlyContinue | "
                      "ForEach-Object { try { $_.StartTime.ToString('o') } catch { '' } });")
     else:
         parts.append("$p=@();")

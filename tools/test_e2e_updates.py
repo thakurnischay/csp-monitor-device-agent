@@ -178,7 +178,8 @@ class E2E(unittest.TestCase):
         import registry
         self.admin(registry.import_registry, "E2E-1,E2E Sample CSP", "tester")
         self.assertEqual(enroll.verify(self.live.url, "E2E-1", "Wrong Name")["verdict"], "name_mismatch")
-        self.assertEqual(enroll.verify(self.live.url, "NOPE-9", "E2E Sample CSP")["verdict"], "unknown_code")
+        unregistered = enroll.verify(self.live.url, "NOPE-9", "E2E Sample CSP")      # allowed through; the admin approves
+        self.assertEqual((unregistered["ok"], unregistered["verdict"]), (True, "not_registered"))
         self.assertEqual(enroll.verify(self.live.url, "E2E-1", "  e2e   SAMPLE csp ")["verdict"], "ok")
         # the code and name alone are never enough: an enrolled-but-unapproved key cannot send heartbeats
         res = enroll.start(config_store.save, self.live.url, "E2E-1", "E2E Sample CSP", "2.0.0")
