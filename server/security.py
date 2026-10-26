@@ -112,4 +112,5 @@ update_limiter = RateLimiter(max_events=90, window_seconds=60)        # per csp_
 campaign_test_limiter = RateLimiter(max_events=5, window_seconds=600)      # test emails, per admin
 campaign_public_limiter = RateLimiter(max_events=240, window_seconds=60)   # open / click / unsubscribe links, per source address
 campaign_events_limiter = RateLimiter(max_events=60, window_seconds=60)    # provider event posts, per source address
+campaign_ai_limiter = RateLimiter(max_events=20, window_seconds=600)       # AI drafts (each costs money), per admin
 

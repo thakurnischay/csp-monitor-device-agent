@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}AI draft #{{ g.id }} - CSP Device Monitor{% endblock %}
+{% block body %}
+<p class="note"><a href="{{ url_for('ui.email_ai_quality') }}" style="color:var(--accent)">&larr; AI quality</a></p>
+<h1>AI draft #{{ g.id }}</h1>
+<p class="note">{{ g.created_at }} by {{ g.created_by }} &middot; model <code>{{ g.model }}</code> &middot; prompt <code>{{ g.prompt_version }}</code> &middot; result <strong>{{ g.status }}</strong>
+  {% if campaign %}&middot; campaign <a href="{{ url_for('ui.email_campaign', cid=campaign.id) }}" style="color:var(--accent)">{{ campaign.name }}</a>{% endif %}</p>
+{% if g.error %}<p class="note">Error: {{ g.error }}</p>{% endif %}
+
+<h2>What the AI wrote</h2>
+<div class="panel"><p><strong>{{ g.output_subject or '-' }}</strong></p><pre class="ai-pre">{{ g.output_body or '' }}</pre></div>
+
+{% if g.flags %}<h2 style="margin-top:22px">Wording to double-check</h2>
+<div class="panel">{% for f in g.flags %}<p class="note"><span class="badge badge-gray">{{ f.severity }}</span> {{ f.why }}: &ldquo;{{ f.phrase }}&rdquo; in &ldquo;{{ f.sentence }}&rdquo;</p>{% endfor %}</div>{% endif %}
+
+{% if diff %}<h2 style="margin-top:22px">What people changed</h2>
+<div class="panel diff"><p class="note">AI text compared with the latest saved or launched text. <ins>added</ins> <del>removed</del></p>
+  <p><strong>{{ diff.subject|safe }}</strong></p><pre class="ai-pre">{{ diff.body|safe }}</pre></div>{% endif %}
+
+<h2 style="margin-top:22px">What happened next</h2>
+<div class="panel"><table>
+  <thead><tr><th>When</th><th>Who</th><th>Event</th><th>Chars changed</th><th>Edit ratio</th><th>Outcome</th><th>Detail</th></tr></thead>
+  <tbody>{% for e in events %}<tr><td>{{ e.occurred_at }}</td><td>{{ e.actor }}</td><td>{{ e.event }}</td>
+    <td>{% if e.outcome %}{{ (e.subject_distance or 0) + (e.body_distance or 0) }}{% else %}-{% endif %}</td><td>{{ e.edit_ratio if e.edit_ratio is not none else '-' }}</td><td>{{ e.outcome or '-' }}</td><td>{{ e.detail }}</td></tr>
+  {% else %}<tr><td colspan="7" class="note">No reactions recorded.</td></tr>{% endfor %}</tbody></table></div>
+
+<h2 style="margin-top:22px">Context given to the model</h2>
+<div class="panel">
+  <p class="note">About {{ g.context_tokens_est }} of {{ g.token_budget }} tokens. Personal data removed from the brief: {% if g.redaction %}{% for k, n in g.redaction.items() %}{{ k }} {{ n }}; {% endfor %}{% else %}none{% endif %}</p>
+  {% for c in g.context %}<div class="ai-chunk"><strong>{{ c.title }}</strong> <span class="note">{{ 'locked' if c.locked else 'optional' }} &middot; {{ c.source }} &middot; {{ c.tokens }} tokens{% if not c.locked %} &middot; relevance {{ c.score }}{% endif %}{% if not c.included %} &middot; left out: {{ c.reason }}{% endif %}</span>
+    {% if c.used %}<span class="badge badge-green">used</span>{% endif %}
+    <details><summary>text</summary><pre class="ai-pre">{{ c.text }}</pre></details></div>{% endfor %}
+</div>
+
+<h2 style="margin-top:22px">Technical record</h2>
+<div class="panel"><p class="note">Tokens in {{ g.input_tokens if g.input_tokens is not none else '-' }}, out {{ g.output_tokens if g.output_tokens is not none else '-' }}, cached {{ g.cache_read_tokens if g.cache_read_tokens is not none else '-' }};
+  {{ g.latency_ms if g.latency_ms is not none else '-' }} ms; request <code>{{ g.request_id or '-' }}</code>; stop reason {{ g.stop_reason or '-' }}; fallback {{ 'yes' if g.fallback_used else 'no' }}; cost about ${{ g.est_cost_usd if g.est_cost_usd is not none else '-' }}</p>
+  <details><summary>Exact prompt sent</summary><pre class="ai-pre">{{ g.system_prompt }}
+
+{{ g.user_prompt }}</pre></details></div>
+{% endblock %}

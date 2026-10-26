@@ -13,6 +13,7 @@ from db import setup
 from routes import ui_bp
 import routes_updates  # noqa: F401  (adds the Agent Updates / Enrollments pages to ui_bp)
 import routes_campaigns  # noqa: F401  (adds the Email Campaigns pages and JSON API to ui_bp)
+import routes_ai  # noqa: F401  (AI drafting assistant endpoints and the AI quality pages)
 from campaign_public import public_bp
 from security import get_csrf_token, verify_csrf
 from datetime import datetime, timezone, timedelta

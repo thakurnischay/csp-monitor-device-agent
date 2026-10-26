@@ -10,6 +10,7 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <a class="btn btn-primary" href="{{ url_for('ui.email_campaign_new') }}">New campaign</a>
     <a class="btn btn-outline" href="{{ url_for('ui.email_operators') }}">Operators &amp; opt-outs</a>
+    <a class="btn btn-outline" href="{{ url_for('ui.email_ai_quality') }}">AI quality</a>
     <a class="btn btn-outline" href="{{ url_for('ui.email_campaigns', **request.args) }}">Refresh</a>
   </div>
 </div>

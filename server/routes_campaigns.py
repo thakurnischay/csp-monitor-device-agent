@@ -21,6 +21,7 @@ from functools import wraps
 from flask import Response, abort, flash, jsonify, redirect, render_template, request, session, url_for
 
 from campaigns import eligibility, operators as ops, queries, rendering, sender, service, tracking
+from campaigns.ai import drafting as ai_drafting, telemetry as ai_telemetry
 from campaigns.service import CampaignError
 from db import get_connection
 from routes import login_required, ui_bp
@@ -83,6 +84,45 @@ def _form_values(source):
             "link_label": source.get("link_label", "")}
 
 
+# ------------------------------------------------------------------------------------------ AI telemetry hooks
+def _ai_generation_for(conn, cid):
+    r = conn.execute("SELECT id FROM ai_generations WHERE campaign_id=? AND status='ok' ORDER BY id DESC LIMIT 1", (cid,)).fetchone()
+    return r["id"] if r else None
+
+
+def _ai_after_save(cid, form, fields):
+    """Link the AI draft the person started from to the campaign and record what they actually saved (edit distance included).
+    Runs only AFTER the campaign change is committed, and can never break the save."""
+    try:
+        gid = form.get("ai_generation_id", "")
+        with get_connection() as conn:
+            if gid.isdigit() and conn.execute("SELECT 1 FROM ai_generations WHERE id=? AND status='ok'", (int(gid),)).fetchone():
+                gid = int(gid)
+            else:
+                gid = _ai_generation_for(conn, cid)
+        if gid:
+            ai_telemetry.link_campaign(gid, cid)
+            ai_telemetry.log_feedback(gid, "draft_saved", _admin(), cid, fields["subject"], fields["body"])
+    except Exception:                                               # noqa: BLE001
+        log.exception("AI telemetry hook failed")
+
+
+def _ai_after_action(cid, action):
+    events = {"launch": "launched", "dry_run": "dry_run", "test": "test_sent"}
+    if action not in events:
+        return
+    try:
+        with get_connection() as conn:
+            gid = _ai_generation_for(conn, cid)
+            c = service.get_campaign(conn, cid) if gid else None
+        if gid and action == "launch":
+            ai_telemetry.log_feedback(gid, "launched", _admin(), cid, c["subject"], c["body"])
+        elif gid:
+            ai_telemetry.log_feedback(gid, events[action], _admin(), cid)
+    except Exception:                                               # noqa: BLE001
+        log.exception("AI telemetry hook failed")
+
+
 # ------------------------------------------------------------------------------------------------- the main tab
 @ui_bp.route("/email-campaigns")
 @login_required
@@ -110,12 +150,13 @@ def email_campaign_new():
             with get_connection() as conn:
                 cid = service.create_campaign(conn, fields, _admin())
                 conn.commit()
+            _ai_after_save(cid, request.form, fields)
             flash("Draft saved. Nothing has been sent. Review the audience, preview the email and run a dry run before launching.")
             return redirect(url_for("ui.email_campaign", cid=cid))
         except _ERRORS as err:
             flash(str(err))
     return render_template("email_campaign_form.html", form=form, editing=None, occasions=service.OCCASIONS, device_labels=ops.DEVICE_LABELS,
-                           placeholders=rendering.PLACEHOLDERS)
+                           placeholders=rendering.PLACEHOLDERS, ai=ai_drafting.settings_summary(), linked_generation=None)
 
 
 @ui_bp.route("/email-campaigns/<int:cid>/edit", methods=["GET", "POST"])
@@ -139,12 +180,15 @@ def email_campaign_edit(cid):
             with get_connection() as conn:
                 service.update_campaign(conn, cid, fields, _admin())
                 conn.commit()
+            _ai_after_save(cid, request.form, fields)
             flash("Saved.")
             return redirect(url_for("ui.email_campaign", cid=cid))
         except _ERRORS as err:
             flash(str(err))
+    with get_connection() as conn:
+        linked = _ai_generation_for(conn, cid)
     return render_template("email_campaign_form.html", form=form, editing=c, occasions=service.OCCASIONS, device_labels=ops.DEVICE_LABELS,
-                           placeholders=rendering.PLACEHOLDERS)
+                           placeholders=rendering.PLACEHOLDERS, ai=ai_drafting.settings_summary(), linked_generation=linked)
 
 
 def _recipient_rows(conn, c, view, page, per_page=25):
@@ -229,14 +273,18 @@ def _perform(conn, cid, action, form):
 @ui_bp.route("/email-campaigns/<int:cid>/action", methods=["POST"])
 @login_required
 def email_campaign_action(cid):
+    action, done = request.form.get("action", ""), False
     with get_connection() as conn:
         try:
-            message, _ = _perform(conn, cid, request.form.get("action", ""), request.form)
+            message, _ = _perform(conn, cid, action, request.form)
             conn.commit()
             flash(message)
+            done = True
         except _ERRORS as err:
             conn.rollback()
             flash(str(err))
+    if done:
+        _ai_after_action(cid, action)
     return redirect(url_for("ui.email_campaign", cid=cid))
 
 
@@ -447,4 +495,5 @@ def api_action(cid, action):
         except _ERRORS as err:
             conn.rollback()
             return jsonify({"ok": False, "error": str(err)}), 400
+    _ai_after_action(cid, action)
     return jsonify({"ok": True, "message": message, "data": data})

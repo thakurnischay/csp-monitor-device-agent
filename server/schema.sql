@@ -396,3 +396,72 @@ CREATE TABLE IF NOT EXISTS email_suppressions (
     created_at          TEXT NOT NULL,
     created_by          TEXT
 );
+
+-- ============================================================================================================
+-- AI drafting telemetry (campaign subject / message drafts). Additive.
+-- One immutable row per model call holds the FULL execution chain: prompt + injected context chunks + model output. The
+-- user's corrections are a separate append-only event log, written asynchronously so telemetry never slows the page.
+-- Nothing here ever holds an operator's name, email, mobile number or CSP code: they are removed before the model is called.
+-- ============================================================================================================
+CREATE TABLE IF NOT EXISTS ai_generations (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at         TEXT NOT NULL,
+    created_by         TEXT,
+    campaign_id        INTEGER,                   -- set when the draft is saved into a campaign
+    kind               TEXT NOT NULL DEFAULT 'campaign_draft',
+    provider           TEXT NOT NULL DEFAULT 'anthropic',
+    model              TEXT,
+    prompt_version     TEXT,
+    effort             TEXT,
+    brief_redacted     TEXT,                      -- what the user typed, after personal data was removed
+    redaction_json     TEXT,                      -- what was removed (counts and kinds, never the values)
+    system_prompt      TEXT,
+    user_prompt        TEXT,
+    context_json       TEXT,                      -- immutable snapshot: every candidate chunk, its score, included or not, and why
+    context_tokens_est INTEGER,
+    token_budget       INTEGER,
+    input_tokens       INTEGER,                   -- reported by the API
+    output_tokens      INTEGER,
+    cache_read_tokens  INTEGER,
+    latency_ms         INTEGER,
+    request_id         TEXT,
+    stop_reason        TEXT,
+    fallback_used      INTEGER NOT NULL DEFAULT 0,
+    status             TEXT NOT NULL,             -- ok / invalid_output / error / refused
+    error              TEXT,
+    output_subject     TEXT,
+    output_body        TEXT,
+    cited_context_json TEXT,                      -- chunk ids the model says it used (model-reported)
+    review_flags_json  TEXT,                      -- phrases the checks want a person to look at (heuristic, NOT model confidence)
+    est_cost_usd       REAL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_gen_campaign ON ai_generations(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ai_gen_created ON ai_generations(created_at);
+CREATE TABLE IF NOT EXISTS ai_feedback (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    generation_id    INTEGER NOT NULL REFERENCES ai_generations(id),
+    campaign_id      INTEGER,
+    occurred_at      TEXT NOT NULL,
+    actor            TEXT,
+    event            TEXT NOT NULL,               -- draft_saved / regenerated / previewed / dry_run / test_sent / launched / abandoned
+    final_subject    TEXT,
+    final_body       TEXT,
+    subject_distance INTEGER,                     -- Levenshtein distance, generated -> user's text
+    body_distance    INTEGER,
+    edit_ratio       REAL,                        -- total distance / longer text length (0 = untouched, 1 = completely rewritten)
+    outcome          TEXT,                        -- unchanged / edited / rewritten (for draft_saved, launched)
+    detail           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_fb_generation ON ai_feedback(generation_id);
+CREATE INDEX IF NOT EXISTS idx_ai_fb_event ON ai_feedback(event, occurred_at);
+CREATE TABLE IF NOT EXISTS ai_eval_runs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at     TEXT NOT NULL,
+    finished_at    TEXT,
+    prompt_version TEXT,
+    model          TEXT,
+    mode           TEXT NOT NULL,                 -- offline (harness check with a stand-in) / live (the real model)
+    cases_total    INTEGER NOT NULL DEFAULT 0,
+    cases_passed   INTEGER NOT NULL DEFAULT 0,
+    details_json   TEXT
+);

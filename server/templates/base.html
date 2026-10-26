@@ -117,6 +117,13 @@
   code.keyval { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.86rem; }
 
   /* ---------- root-cause diagnosis ---------- */
+  .ai-panel { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .ai-chunk { padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  .ai-pre { white-space: pre-wrap; font-size: 0.78rem; margin: 4px 0; }
+  .ai-bar { display: inline-block; width: 140px; height: 8px; border-radius: 4px; background: var(--border); vertical-align: middle; }
+  .ai-bar-fill { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+  .diff ins { background: #d1fadf; text-decoration: none; }
+  .diff del { background: #fee4e2; }
   .sev { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; margin-left: 6px; }
   .sev-critical { background: #7f1d1d; color: #fff; } .sev-high { background: #dc2626; color: #fff; }
   .sev-medium { background: #fde68a; color: #78350f; } .sev-low { background: #e2e8f0; color: #475569; }
@@ -193,5 +200,6 @@
 </main>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script src="{{ url_for('static', filename='campaigns.js') }}"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

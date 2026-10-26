@@ -28,6 +28,26 @@
     <label style="margin-left:16px;font-weight:500"><input type="checkbox" name="include_dormant" value="1" {{ 'checked' if form.include_dormant }}> Also include dormant operators (active on paper, very few transactions)</label>
   </fieldset>
 
+  <input type="hidden" name="ai_generation_id" id="ai_generation_id" value="{{ linked_generation or '' }}">
+  <fieldset id="ai-panel" class="ai-panel" data-draft-url="{{ url_for('ui.api_ai_draft') }}" data-context-url="{{ url_for('ui.api_ai_context') }}">
+    <legend style="font-size:0.85rem;font-weight:600">AI drafting assistant <span class="note">(optional - you stay in control)</span></legend>
+    {% if not ai.enabled %}<p class="note">The assistant is not switched on for this server (an administrator must set it up). You can still see exactly what it would be given.</p>{% endif %}
+    <label for="ai_brief">Anything the assistant should know? (optional. Do not type names, emails or phone numbers; they are removed before anything leaves this server.)</label>
+    <textarea id="ai_brief" rows="2" maxlength="1000" style="width:100%"></textarea>
+    <div style="margin:8px 0">
+      <button type="button" class="btn btn-outline" id="ai-preview">Show what the assistant would see</button>
+      <button type="button" class="btn btn-primary" id="ai-draft" {{ 'disabled' if not ai.enabled }}>Draft with AI</button>
+      <span class="note" id="ai-status" role="status"></span>
+    </div>
+    <div id="ai-budget" class="note"></div>
+    <div id="ai-chunks"></div>
+    <div id="ai-result" hidden>
+      <p class="note"><strong>Why this draft:</strong> <span id="ai-why"></span></p>
+      <div id="ai-flags"></div>
+      <p class="note">The draft is placed in the fields below. Check it, edit it freely, then save. Your edits are measured so the assistant can improve. Placeholders such as <code>{name}</code> are filled in by the system for each operator.</p>
+    </div>
+  </fieldset>
+
   <div><label for="subject">Email subject</label><input id="subject" name="subject" value="{{ form.subject }}" maxlength="150" required style="width:100%"></div>
   <div><label for="body">Message (plain text; a blank line starts a new paragraph)</label><textarea id="body" name="body" rows="9" maxlength="8000" required>{{ form.body }}</textarea>
     <p class="note">Placeholders you can use: {% for p in placeholders %}<code>{{ '{' ~ p ~ '}' }}</code> {% endfor %}. <code>{missing_devices}</code> names only the devices confirmed missing for that operator. HTML is not allowed (it would be shown as text).</p></div>
@@ -40,3 +60,4 @@
     <a class="btn btn-outline" href="{{ url_for('ui.email_campaign', cid=editing.id) if editing else url_for('ui.email_campaigns') }}">Cancel</a></div>
 </form>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='campaign_ai.js') }}"></script>{% endblock %}
