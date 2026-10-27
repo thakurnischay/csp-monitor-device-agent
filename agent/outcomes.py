@@ -155,6 +155,22 @@ class Ledger:
         cutoff = now - timedelta(days=KEEP_DAYS)
         data["closed"] = [e for e in data["closed"] if (_parse(e.get("resolved_at")) or now) >= cutoff][-MAX_CLOSED:]
 
+    # ------------------------------------------------------------------ reporting
+    def recent_closed(self, now=None, days=7, limit=30):
+        """Compact rows for the heartbeat: problems that closed in the last `days`. The same rows are sent again on each report until
+        they age out, and the server keys them by (device, code, first_seen), so a lost report or a repeat can never double count,
+        and a later 'recurred' flag simply updates the row."""
+        now = now or _now()
+        with self._lock:
+            data = self._load()
+        cutoff = now - timedelta(days=days)
+        rows = [e for e in data["closed"] if (_parse(e.get("resolved_at")) or now) >= cutoff][-limit:]
+        return [{"device": e["device"], "code": e["code"], "first_seen": e["first_seen"], "resolved_at": e["resolved_at"],
+                 "duration_s": e["duration_s"], "checks": e["checks"], "confidence": e.get("confidence"), "severity": e.get("severity"),
+                 "offered_fix": e.get("offered_fix"), "resolution": e["resolution"], "recurred": bool(e.get("recurred")),
+                 "actions": [{"action": a.get("action"), "target": a.get("target"), "result": a.get("result")} for a in e["actions"]]}
+                for e in rows]
+
     # ------------------------------------------------------------------ reading
     def summary(self, now=None, days=30):
         """Per problem code: how often, how long, did offered fixes work and stick. Pure arithmetic over the local records."""
@@ -187,6 +203,15 @@ class Ledger:
 def for_history(history):
     """The ledger that sits next to a History file (tests give History a temp path, so they get a temp ledger)."""
     return Ledger(default_path(history.path))
+
+
+def report_rows():
+    """What the heartbeat carries. Never raises."""
+    try:
+        import diagnostics
+        return for_history(diagnostics.History()).recent_closed()
+    except Exception:                                               # noqa: BLE001
+        return []
 
 
 if __name__ == "__main__":                       # python outcomes.py  -> print this PC's summary

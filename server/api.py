@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 from db import get_connection
 from device_state import derive_device_state
 import diagnosis
+import learning
 import updates
 from events import apply_device_transition, record_event
 from security import report_limiter, verify_api_key
@@ -195,6 +196,10 @@ def report():
         # Root-cause diagnosis (agent 2.0+). Devices covered by it get their events/
         # incidents from the issue history; older agents keep the shallow logic below.
         diag_handled = diagnosis.store(conn, csp_id, body, now)
+        try:                                   # outcome records (agent 2.3+): must never be able to fail a heartbeat
+            learning.store(conn, csp_id, body, now)
+        except Exception:                      # noqa: BLE001
+            log.exception("could not store outcome records from %s", csp_id)
         old_printer_state = derive_device_state(
             old["printer_configured"] if old else 0, old["printer_present"] if old else 0,
             old["printer_ok"] if old else 0, old["printer_status"] if old else "",

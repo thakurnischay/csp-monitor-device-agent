@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Diagnosis Outcomes - CSP Device Monitor{% endblock %}
+{% block body %}
+<h1>Diagnosis outcomes</h1>
+<p class="note">What happened to each problem the agents diagnosed, and what administrators said about the diagnoses (last {{ days }} days).
+  This page only <strong>records and describes</strong>. It never changes a diagnosis, a rule or any PC. A problem type needs at least {{ min_episodes }} finished cases before its figures mean much.</p>
+<p class="note">{{ total }} finished case{{ 's' if total != 1 }} from {{ agents }} PC{{ 's' if agents != 1 }} &middot; {{ feedback }} administrator answer{{ 's' if feedback != 1 }}.
+  Agents running version 2.3.0 or newer send these records. Older agents do not.</p>
+
+<div class="panel">
+  <table>
+    <thead><tr><th>Device</th><th>Problem</th><th>Finished cases</th><th>PCs</th><th>Open now</th><th>Typical time to clear</th><th>Fix offered</th><th>Came back &le;3 days</th><th>Admin verdicts</th><th>Evidence</th></tr></thead>
+    <tbody>
+    {% for s in rows %}
+      <tr>
+        <td>{{ s.device }}</td><td><code>{{ s.code }}</code>
+          {% for kind, text in s.signals %}<div class="note"><span class="badge badge-{{ 'green' if kind == 'good' else 'amber' if kind == 'warn' else 'gray' }}"><span class="dot"></span>{{ kind if kind != 'good' else 'ok' }}</span> {{ text }}</div>{% endfor %}</td>
+        <td>{{ s.episodes }}<div class="note">{{ s.self_resolved }} cleared on their own</div></td>
+        <td>{{ s.csps }}</td>
+        <td>{{ s.open_now }}{% if s.open_now %}<div class="note">on {{ s.open_csps }} PC{{ 's' if s.open_csps != 1 }}</div>{% endif %}</td>
+        <td>{{ (s.median_minutes ~ ' min') if s.median_minutes is not none else '-' }}</td>
+        <td>{% if s.fix_attempts %}{{ s.fix_attempts }} tried<div class="note">{{ s.fix_then_resolved }} then cleared, {{ s.fix_stuck }} stayed fixed</div>{% else %}-{% endif %}</td>
+        <td>{{ s.recurred }}{% if s.episodes %} of {{ s.episodes }}{% endif %}</td>
+        <td>{% if s.verdicts.total %}{{ s.verdicts.correct }} correct, {{ s.verdicts.wrong }} wrong, {{ s.verdicts.unclear }} not sure{% else %}-{% endif %}</td>
+        <td>{% if s.evidence == 'enough' %}<span class="badge badge-green"><span class="dot"></span>Enough</span>{% else %}<span class="badge badge-gray"><span class="dot"></span>Not enough yet</span>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="note">Nothing recorded yet. Records start arriving once PCs run agent 2.3.0 or newer and a problem has appeared and cleared.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="note">To add your own judgement, open a PC from the Fleet page and answer <em>Was this right?</em> under any open issue.</p>
+{% endblock %}

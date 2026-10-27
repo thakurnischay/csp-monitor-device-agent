@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ c.name or c.csp_id }} - CSP Device Monitor{% endblock %}
+{% block crumb %}<a href="{{ url_for('ui.fleet') }}" style="color:inherit;text-decoration:none;font-weight:500">Fleet</a> <span class="sep">/</span> {{ c.name or c.csp_id }}{% endblock %}
 {% block body %}
 {% macro diag_panel(c, dev, title, dev_issues) %}
 {% set dg = c[dev ~ '_diag'] %}
@@ -37,6 +38,14 @@
       <dt>Recommended steps</dt><dd><ol>{% for a in f.actions %}<li>{{ a }}</li>{% endfor %}</ol></dd>
       <dt>Who acts</dt><dd>{% if f.auto_fix %}Operator approval needed: the CSP can click <em>Start it now</em> on the agent page (http://127.0.0.1:5057) - nothing is changed automatically.
         {% elif f.operator_action %}Operator action required on the CSP's PC.{% else %}No action needed.{% endif %}</dd>
+      <dt>Was this right?</dt><dd>
+        {% if verdicts.get(f.id) %}<span class="note">You said: <strong>{{ verdict_labels[verdicts[f.id]] }}</strong>. You can change it:</span>{% else %}<span class="note">Your answer helps improve the diagnosis rules. It changes nothing on the PC.</span>{% endif %}
+        <form method="post" action="{{ url_for('ui.diagnosis_feedback') }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="issue_id" value="{{ f.id }}">
+          <button class="btn btn-outline btn-sm" name="verdict" value="correct">Correct</button>
+          <button class="btn btn-outline btn-sm" name="verdict" value="wrong">Wrong</button>
+          <button class="btn btn-outline btn-sm" name="verdict" value="unclear">Not sure</button>
+        </form></dd>
       <dt>Timeline</dt><dd>Since {{ f.first_seen | ist }} ({{ f.first_seen | relative_time }}) &middot; occurrence {{ f.occurrences }} of this issue{% if f.occurrences > 1 %} (it has happened before){% endif %}</dd>
     </dl>
   </div>

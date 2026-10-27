@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from flask import Blueprint, Response, flash, redirect, render_template, request, session, url_for
 
 import diagnosis
+import learning
 import software
 from db import get_connection
 from device_state import (ONLINE_WINDOW_MIN, NEVER_REPORTED, NOT_REPORTED, OFFLINE, ONLINE, STALE,
@@ -220,7 +221,7 @@ def fleet():
                           biometric_problems=biometric_problems, gps_problems=gps_problems,
                           unverified_devices=unverified_devices, urgent_issues=urgent_issues, q=q, status_filter=status_filter,
                           problems_only=problems_only, sort=sort, direction=direction,
-                          page=page, total_pages=total_pages, refresh=refresh,
+                          page=page, total_pages=total_pages, page_size=FLEET_PAGE_SIZE, refresh=refresh,
                           qs=qs, sort_urls=sort_urls, csv_url=csv_url,
                           updated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
 
@@ -271,6 +272,7 @@ def csp_detail(csp_id):
             (csp_id,)).fetchall()
         diags = diagnosis.load(conn, csp_id)
         issues = diagnosis.issues_for(conn, csp_id)
+        verdicts = learning.my_verdicts(conn, session.get("admin_login") or "admin", [i["id"] for i in issues])
         reqs = software.requirements(conn)
         sw_items = {dev: software.annotate(software.clean_inventory(((diags.get(dev) or {}).get("detail") or {}).get("software"), dev), reqs)
                     for dev in software.DEVICE_TITLES}
@@ -294,6 +296,7 @@ def csp_detail(csp_id):
     issues_by_device = {dev: [i for i in issues if i["device"] == dev] for dev in _DEVICES}
     return render_template("csp_detail.html", c=d, events=events, issues=issues_by_device, sw_items=sw_items,
                            sw_labels=software.VERDICT_LABELS, sw_titles=software.DEVICE_TITLES,
+                           verdicts=verdicts, verdict_labels=learning.VERDICTS,
                           open_incidents=open_incidents, past_incidents=past_incidents)
 
 

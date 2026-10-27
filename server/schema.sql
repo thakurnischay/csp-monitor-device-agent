@@ -465,3 +465,41 @@ CREATE TABLE IF NOT EXISTS ai_eval_runs (
     cases_passed   INTEGER NOT NULL DEFAULT 0,
     details_json   TEXT
 );
+
+-- ===================================================================================================
+-- Diagnosis learning (stage 2): what happened to each problem the agents diagnosed, and what the administrator thinks of
+-- the diagnoses. Records only; nothing here changes any diagnosis or rule.
+-- ===================================================================================================
+CREATE TABLE IF NOT EXISTS diagnosis_outcomes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    csp_id        TEXT NOT NULL,
+    device        TEXT NOT NULL,
+    code          TEXT NOT NULL,
+    first_seen    TEXT NOT NULL,
+    resolved_at   TEXT NOT NULL,
+    duration_s    INTEGER NOT NULL DEFAULT 0,
+    checks        INTEGER NOT NULL DEFAULT 1,
+    confidence    TEXT,
+    severity      TEXT,
+    offered_fix   TEXT,
+    resolution    TEXT NOT NULL,                 -- after_fix | self_resolved
+    recurred      INTEGER NOT NULL DEFAULT 0,
+    actions_json  TEXT,
+    agent_version TEXT,
+    received_at   TEXT NOT NULL,
+    UNIQUE (csp_id, device, code, first_seen)
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_code ON diagnosis_outcomes(device, code, resolved_at);
+
+CREATE TABLE IF NOT EXISTS diagnosis_feedback (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL,
+    admin       TEXT NOT NULL,
+    csp_id      TEXT NOT NULL,
+    device      TEXT NOT NULL,
+    code        TEXT NOT NULL,
+    issue_id    INTEGER,
+    verdict     TEXT NOT NULL,                   -- correct | wrong | unclear
+    note        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dfeedback_code ON diagnosis_feedback(device, code);

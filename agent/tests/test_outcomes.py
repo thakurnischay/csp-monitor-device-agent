@@ -119,6 +119,23 @@ class Summary(LedgerCase):
         self.assertEqual(s["median_minutes_to_resolve"], 20.0)
 
 
+class Reporting(LedgerCase):
+    def test_recent_closed_rows_are_compact_and_age_out(self):
+        self.led.observe(diag("A", fix=True), T0)
+        self.led.record_action("printer", "A", "start_service", "Spooler", "ok", T0 + timedelta(minutes=1))
+        self.led.observe(diag(), T0 + timedelta(minutes=20))
+        rows = self.led.recent_closed(T0 + timedelta(days=1))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["device"], rows[0]["code"], rows[0]["resolution"]), ("printer", "A", "after_fix"))
+        self.assertEqual(rows[0]["actions"], [{"action": "start_service", "target": "Spooler", "result": "ok"}])
+        self.assertNotIn("evidence", rows[0])
+        self.assertEqual(self.led.recent_closed(T0 + timedelta(days=30)), [])
+
+    def test_report_rows_never_raises(self):
+        with mock.patch.object(outcomes, "for_history", side_effect=RuntimeError("boom")):
+            self.assertEqual(outcomes.report_rows(), [])
+
+
 class Robustness(LedgerCase):
     def test_corrupt_file_is_ignored_not_fatal(self):
         with open(self.led.path, "w") as f:

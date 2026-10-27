@@ -4,7 +4,7 @@ import os
 import secrets as _secrets
 from logging.handlers import RotatingFileHandler
 
-from flask import Flask, Request, abort, request
+from flask import Flask, Request, abort, request, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from api import api_bp
@@ -13,6 +13,7 @@ from db import setup
 from routes import ui_bp
 import routes_updates  # noqa: F401  (adds the Agent Updates / Enrollments pages to ui_bp)
 import routes_campaigns  # noqa: F401  (adds the Email Campaigns pages and JSON API to ui_bp)
+import routes_learning  # noqa: F401  (diagnosis outcomes page and the "was this right?" answers)
 import routes_ai  # noqa: F401  (AI drafting assistant endpoints and the AI quality pages)
 from campaign_public import public_bp
 from security import get_csrf_token, verify_csrf
@@ -100,6 +101,16 @@ def create_app() -> Flask:
     app.register_blueprint(public_bp)
 
     app.jinja_env.globals["csrf_token"] = get_csrf_token
+
+    def brand_logo():
+        """URL of the supplied Eko logo file if it has been placed in static/img/ (svg preferred), else None -
+        the layout then shows its built-in drawn mark. Checked per render so dropping the file in needs no restart."""
+        for name in ("eko-logo.svg", "eko-logo.png", "eko-logo.webp"):
+            if os.path.isfile(os.path.join(app.static_folder, "img", name)):
+                return url_for("static", filename="img/" + name)
+        return None
+    app.jinja_env.globals["brand_logo"] = brand_logo
+    app.jinja_env.globals["has_endpoint"] = lambda name: name in app.view_functions
 
     @app.before_request
     def _csrf_protect():

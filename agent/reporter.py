@@ -17,6 +17,7 @@ import requests
 import config_store
 import diagnostics
 import enroll
+import outcomes
 import update_client
 import device_health
 from version import AGENT_VERSION, SCHEMA_VERSION
@@ -117,6 +118,7 @@ def _fit(payload: dict) -> dict:
             d["checked"], d["not_checked"], d["notes"] = [], [], []
         if len(json.dumps(payload, default=str)) > _MAX_PAYLOAD_BYTES:
             payload["diagnosis"] = {}
+            payload["outcomes"] = []
     except Exception:
         pass
     return payload
@@ -204,6 +206,7 @@ def build_payload(cfg: dict) -> dict:
         "gps": health["gps"],
         "printer_functional_test": functional,
         "diagnosis": diagnosis,
+        "outcomes": outcomes.report_rows(),
         **_update_fields(),
     })
 
