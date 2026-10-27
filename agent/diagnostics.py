@@ -41,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 import deep_checks
 import device_health as dh
 import impact_map
+import outcomes
 
 DEVICES = ("printer", "microatm", "biometric", "gps")
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
@@ -1175,6 +1176,10 @@ def analyze(health, cfg, functional=None, history=None, evidence=None, impact=No
                 if f["severity"] == "high":
                     f["severity"] = "critical"
             result[d]["summary"] += " (several services are down at this CSP)"
+    try:                                         # remember what happened to each problem (records only; changes nothing)
+        outcomes.for_history(history).observe(result, now)
+    except Exception:
+        pass
     return result
 
 
@@ -1213,6 +1218,10 @@ def start_service(service, diagnosis, history=None, now=None, runner=None):
                                         "It is not retried automatically - the cause needs to be found (see the steps shown)."}
     ok, detail = runner(service)
     history.record_action(dev, "start_service", service, "ok" if ok else _clip(detail, 160), now)
+    try:
+        outcomes.for_history(history).record_action(dev, target.get("code"), "start_service", service, "ok" if ok else "failed", now)
+    except Exception:
+        pass
     reset_cache()                    # the next check must see the NEW state, not a cached "stopped"
     deep_checks.clear_cache()
     if ok:

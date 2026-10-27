@@ -42,7 +42,7 @@ STATE_FILE = "release_state.json"
 
 # What goes into a release: the agent's own code. Never tests, wheels, local state or secrets.
 INCLUDE_TOP = ["agent.py", "config_store.py", "deep_checks.py", "device_health.py", "diagnostics.py",
-               "impact_map.py", "local_ui.py", "reporter.py", "singleton.py", "version.py", "diagnose.py",
+               "impact_map.py", "outcomes.py", "local_ui.py", "reporter.py", "singleton.py", "version.py", "diagnose.py",
                "ed25519.py", "release_manifest.py", "update_client.py", "apply_update.py", "enroll.py",
                "release_public_keys.json", "requirements.txt", "DIAGNOSE.bat"]
 INCLUDE_DIRS = ["installer"]

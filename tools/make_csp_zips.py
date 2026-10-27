@@ -34,7 +34,7 @@ DEFAULT_SERVER_URL = "https://openclaw-poweredge-r730.tailb276af.ts.net:8443/"
 
 # what ships to a CSP (tests, caches and local state never do)
 AGENT_FILES = [
-    "agent.py", "config_store.py", "deep_checks.py", "device_health.py", "diagnostics.py", "impact_map.py", "local_ui.py",
+    "agent.py", "config_store.py", "deep_checks.py", "device_health.py", "diagnostics.py", "impact_map.py", "outcomes.py", "local_ui.py",
     "reporter.py", "singleton.py", "version.py", "diagnose.py", "requirements.txt",
     "apply_update.py", "ed25519.py", "enroll.py", "release_manifest.py", "release_public_keys.json", "update_client.py",
     "DIAGNOSE.bat", "INSTALL_FOR_CSP.txt", "install_task.ps1", "uninstall_task.ps1",

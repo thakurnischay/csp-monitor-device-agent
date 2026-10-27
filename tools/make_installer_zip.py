@@ -20,7 +20,7 @@ AGENT_DIR = os.path.join(os.path.dirname(HERE), "agent")
 sys.path.insert(0, AGENT_DIR)
 
 FILES = ["SETUP.bat", "agent.py", "apply_update.py", "config_store.py", "deep_checks.py", "device_health.py", "diagnose.py",
-         "diagnostics.py", "ed25519.py", "enroll.py", "impact_map.py", "local_ui.py", "release_manifest.py",
+         "diagnostics.py", "ed25519.py", "enroll.py", "impact_map.py", "outcomes.py", "local_ui.py", "release_manifest.py",
          "release_public_keys.json", "reporter.py", "requirements.txt", "singleton.py", "update_client.py", "version.py",
          "DIAGNOSE.bat", "install_task.ps1", "uninstall_task.ps1",
          "installer/__init__.py", "installer/installer_core.py", "installer/wizard.py"]
