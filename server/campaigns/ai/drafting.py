@@ -14,7 +14,7 @@ import re
 import time
 
 from .. import operators as ops, rendering
-from . import context, knowledge, redaction, telemetry
+from . import context, knowledge, nvidia, redaction, telemetry
 
 log = logging.getLogger("csp_monitor.ai_drafting")
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -36,18 +36,38 @@ class DraftError(Exception):
         self.generation_id = generation_id
 
 
+def provider():
+    """'anthropic' (default) or 'nvidia' (Nemotron etc. through NVIDIA's API), from CAMPAIGN_AI_PROVIDER."""
+    return "nvidia" if (os.environ.get("CAMPAIGN_AI_PROVIDER") or "").strip().lower() == "nvidia" else "anthropic"
+
+
+def _key_env():
+    return "NVIDIA_API_KEY" if provider() == "nvidia" else "ANTHROPIC_API_KEY"
+
+
+def _key():
+    return (os.environ.get(_key_env()) or "").strip()
+
+
 def model_name():
-    return (os.environ.get("CAMPAIGN_AI_MODEL") or DEFAULT_MODEL).strip()
+    default = nvidia.DEFAULT_MODEL if provider() == "nvidia" else DEFAULT_MODEL
+    return (os.environ.get("CAMPAIGN_AI_MODEL") or default).strip()
 
 
 def enabled():
-    return bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip()) and (os.environ.get("CAMPAIGN_AI_ENABLED") or "1").strip() != "0"
+    return bool(_key()) and (os.environ.get("CAMPAIGN_AI_ENABLED") or "1").strip() != "0"
+
+
+def system_prompt():
+    """Exactly what is sent as the system prompt (the NVIDIA path adds the JSON-only instruction)."""
+    return knowledge.SYSTEM_PROMPT + (nvidia.JSON_INSTRUCTION if provider() == "nvidia" else "")
 
 
 def settings_summary():
     """Safe for a web page: never contains the key."""
-    return {"enabled": enabled(), "key_set": bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip()), "model": model_name(),
-            "prompt_version": knowledge.PROMPT_VERSION, "context_budget_tokens": context.budget(), "effort": EFFORT}
+    return {"enabled": enabled(), "key_set": bool(_key()), "provider": provider(), "model": model_name(),
+            "prompt_version": knowledge.PROMPT_VERSION, "context_budget_tokens": context.budget(),
+            "effort": EFFORT if provider() == "anthropic" else "n/a"}
 
 
 def get_client():
@@ -130,16 +150,20 @@ def _public_chunks(plan, cited=()):
 # -------------------------------------------------------------------------------------------------- generation
 def generate(conn, fields, brief, excluded_ids, actor, client=None, replaces=None):
     """One model call. `fields`: {occasion, devices}. Always records a telemetry row; raises AiUnavailable / DraftError."""
+    use_nvidia = client is None and provider() == "nvidia"
     if client is None:
         if not enabled():
-            raise AiUnavailable("AI drafting is not set up on this server (an administrator must set ANTHROPIC_API_KEY).")
-        client = get_client()
+            raise AiUnavailable("AI drafting is not set up on this server (an administrator must set %s)." % _key_env())
+        if not use_nvidia:
+            client = get_client()
     prep = prepare(conn, fields, brief, excluded_ids)
     plan, known = prep["plan"], prep["known"]
     user_prompt = context.render_user_prompt(plan, fields["occasion"], fields["devices"], prep["brief_clean"])
     model = model_name()
-    base = {"created_by": actor, "model": model, "prompt_version": knowledge.PROMPT_VERSION, "effort": EFFORT, "brief_redacted": prep["brief_clean"],
-            "redaction": prep["redaction"], "system_prompt": knowledge.SYSTEM_PROMPT, "user_prompt": user_prompt,
+    system = system_prompt() if use_nvidia else knowledge.SYSTEM_PROMPT
+    base = {"created_by": actor, "provider": "nvidia" if use_nvidia else "anthropic", "model": model, "prompt_version": knowledge.PROMPT_VERSION,
+            "effort": "n/a" if use_nvidia else EFFORT, "brief_redacted": prep["brief_clean"],
+            "redaction": prep["redaction"], "system_prompt": system, "user_prompt": user_prompt,
             "context": _public_chunks(plan), "context_tokens_est": plan["tokens_used"], "token_budget": plan["budget"]}
 
     def fail(status, message, **extra):
@@ -147,17 +171,20 @@ def generate(conn, fields, brief, excluded_ids, actor, client=None, replaces=Non
         conn.commit()
         raise DraftError(message, gid)
 
-    leaked = redaction.leaks(knowledge.SYSTEM_PROMPT + "\n" + user_prompt, known)
+    leaked = redaction.leaks(system + "\n" + user_prompt, known)
     if leaked:                                                  # defence in depth: nothing personal may leave
         fail("error", "Blocked: the prompt still contained personal data (%s), so nothing was sent to the AI service." % ", ".join(leaked))
 
     started = time.time()
     try:
-        resp = client.beta.messages.create(
-            model=model, max_tokens=MAX_TOKENS, system=knowledge.SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-            output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": knowledge.OUTPUT_SCHEMA}},
-            betas=[FALLBACK_BETA], fallbacks="default")
+        if use_nvidia:
+            resp = nvidia.create(model, system, user_prompt, _key(), os.environ.get("NVIDIA_BASE_URL"), timeout=60.0)
+        else:
+            resp = client.beta.messages.create(
+                model=model, max_tokens=MAX_TOKENS, system=knowledge.SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+                output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": knowledge.OUTPUT_SCHEMA}},
+                betas=[FALLBACK_BETA], fallbacks="default")
     except Exception as err:                                    # noqa: BLE001 - classified for a friendly message
         log.warning("AI drafting call failed: %s", type(err).__name__)
         fail("error", _friendly(err), latency_ms=int((time.time() - started) * 1000))

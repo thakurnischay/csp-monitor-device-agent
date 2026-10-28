@@ -34,6 +34,13 @@ Set in the server environment (never in the repository): `ANTHROPIC_API_KEY`, op
 off, `CAMPAIGN_AI_MODEL` (default `claude-opus-5-5`), `CAMPAIGN_AI_CONTEXT_BUDGET`. `anthropic` is a new dependency; rebuilding the
 Docker image installs it. Telemetry writes happen in a background thread and can never block a page.
 
+## Using NVIDIA Nemotron instead of Anthropic
+
+Set `CAMPAIGN_AI_PROVIDER=nvidia`, `NVIDIA_API_KEY=nvapi-...` and `CAMPAIGN_AI_MODEL=<exact model name from build.nvidia.com>` in the server `.env`,
+then `docker compose up -d`. Needs outbound HTTPS to integrate.api.nvidia.com. Same privacy rules, telemetry and quality page; each draft
+records its provider. Nemotron replies are cleaned of `<think>` blocks and code fences; a reply that is not valid JSON, or uses unknown
+placeholders, is recorded as `invalid_output` (shown on the quality page as a lower completion rate). Cost is not estimated for NVIDIA.
+
 ## Golden test set
 
 `server/campaigns/ai/golden.json`: 56 fixed cases (14 occasions x 4 device sets) with programmatic graders (valid placeholders, no
