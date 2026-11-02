@@ -1,0 +1,53 @@
+Deploy: Device Sales (the CSP Growth Platform, merged into the dashboard at /growth)
+====================================================================================
+Adds the Device Sales section and the public order page to the live dashboard and moves the Growth Platform's data
+(orders, email history, 535 CSPs) onto the server. Drip emails stay DRY - nothing is sent to CSPs by this deploy.
+No change to the dashboard database or to the agents.
+
+Like the Hindi deploy, it ADDS to the live files (other changes on the server are kept), tests every page in a
+throwaway container first, and changes nothing if anything fails.
+
+--- BEFORE YOU START -------------------------------------------------------------------------------------------
+Do NOT start the old Growth Platform (python run.py) on the laptop again after this. From now on the server is the
+only copy of the orders and email history; two running copies would split the data.
+
+--- STEP 1. On YOUR PC (PowerShell) - package and copy 5 files to the server --------------------------------------
+cd C:\Users\ASUS\Downloads\csp-device-monitor
+tar -czf growth_platform.tgz -C server --exclude=__pycache__ --exclude=growth_platform/data growth_platform
+Get-Content "..\Product growth (2)\Product growth\csp-growth-platform\.env" | Select-String "^ORDER_PAGE_SHEET_MIRROR_URL=" | ForEach-Object { $_.Line } | Set-Content -Encoding ascii extra.env
+ssh -p 2222 kapil@indev.eko.in "mkdir -p ~/growth"
+scp -P 2222 deploy_growth.sh growth_platform.tgz extra.env "..\Product growth (2)\Product growth\csp-growth-platform\backend\data\state.json" "..\Product growth (2)\Product growth\csp-growth-platform\backend\data\csps.json" kapil@indev.eko.in:~/growth/
+
+--- STEP 2. Log in to the server ------------------------------------------------------------------------------------
+ssh -p 2222 kapil@indev.eko.in
+
+--- STEP 3. On the SERVER - run it ----------------------------------------------------------------------------------
+bash ~/growth/deploy_growth.sh
+# takes a few minutes (the rebuild installs pandas). It must end with:
+#   DONE: Device Sales is live at https://indev.eko.in/csp-device-heartbeat/growth/
+# if it prints STOP or WARNING, paste the whole output to Claude.
+
+--- STEP 4. In the browser ------------------------------------------------------------------------------------------
+Open the dashboard, press Ctrl+F5 once, click "Device Sales" in the sidebar. Check:
+  - Overview shows 535 CSPs; Orders shows the 6 orders; Messages shows the past emails
+  - the top-right pill says DRY RUN
+  - https://indev.eko.in/csp-device-heartbeat/growth/order.html opens on a phone (mobile data, not office Wi-Fi)
+
+--- STEP 5. Clean up the copies of CSP data ---------------------------------------------------------------------------
+On the SERVER:   rm -f ~/growth/state.json ~/growth/csps.json ~/growth/extra.env ~/growth/growth_platform.tgz
+On YOUR PC:      del growth_platform.tgz, extra.env   (in C:\Users\ASUS\Downloads\csp-device-monitor)
+
+--- LATER (not part of this deploy) ---------------------------------------------------------------------------------
+* Sending the drip for real: only after SPF/DKIM pass. Then on the server set GROWTH_EMAIL_MODE=live in
+  ~/csp-heartbeat-v2/.env (GROWTH_EMAIL_MAX_PER_RUN is 5 to start) and run:
+  cd ~/csp-heartbeat-v2 && sudo docker compose up -d
+* Old links in emails already sent point to orders.kiosk.eko.in / 122.176.147.78 (the laptop). They already don't
+  work while the laptop app is off; to fix them, that address needs a redirect to the new /growth/ path
+  (see GROWTH_PLATFORM.md).
+* Whoever copies dashboard files onto this server by hand must include growth_platform/ and the app.py/base.html
+  lines, or Device Sales disappears again. Re-running STEP 3 adds it back (it never overwrites the data).
+
+--- UNDO (on the server, only if needed) ----------------------------------------------------------------------------
+bash ~/growth/deploy_growth.sh --undo
+# restores app.py, base.html, hindi.py, requirements.txt and .env from the backup and rebuilds.
+# The Growth data stays in the container's data folder.

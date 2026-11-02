@@ -70,6 +70,45 @@ class Access(GrowthCase):
         self.assertIn("CSRF", r.get_json()["error"])
 
 
+class PaymentQr(GrowthCase):
+    PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                        "1f15c4890000000d49444154789c63000100000500010d0a2db40000000049454e44ae426082")
+
+    def qr(self):
+        return self.client.get("/growth/api/order-page/config").get_json()["qr"]
+
+    def upload(self):
+        with open(os.path.join(self.data_dir, "payment-qr.png"), "wb") as f:
+            f.write(self.PNG)
+
+    def test_bank_transfer_only_by_default(self):
+        with mock.patch.dict(os.environ, {"ORDER_PAGE_QR_ENABLED": ""}):
+            self.assertEqual(self.qr(), {"enabled": False, "image": None})
+            self.upload()                                              # a QR file on its own does not switch QR on
+            self.assertEqual(self.qr(), {"enabled": False, "image": None})
+
+    def test_switched_on_without_a_qr_file_still_shows_no_qr(self):
+        with mock.patch.dict(os.environ, {"ORDER_PAGE_QR_ENABLED": "true"}):
+            self.assertEqual(self.qr(), {"enabled": False, "image": None})
+        self.assertEqual(self.client.get("/growth/payment-qr").status_code, 404)
+
+    def test_switched_on_with_a_qr_file_the_qr_is_offered_and_public(self):
+        self.upload()
+        with mock.patch.dict(os.environ, {"ORDER_PAGE_QR_ENABLED": "true"}):
+            qr = self.qr()
+        self.assertTrue(qr["enabled"])
+        self.assertTrue(qr["image"].startswith("payment-qr?v="))      # relative to order.html, so the /growth prefix holds
+        r = self.client.get("/growth/" + qr["image"])                  # no login: the CSP's browser loads it
+        self.assertEqual((r.status_code, r.mimetype, r.data), (200, "image/png", self.PNG))
+
+    def test_a_qr_order_is_accepted(self):
+        with mock.patch.object(gstore, "save_state"), mock.patch("growth_platform.core.orderpage.mirror_to_sheet"):
+            r = self.client.post("/growth/api/order-page/submit", json={
+                "cspCode": "CSP001", "productId": "MATM", "paymentMethod": "qr", "utr": "412345678901",
+                "addressLine": "Main Road", "city": "Patna", "pincode": "800001", "deliveryState": "Bihar"})
+        self.assertNotIn("Unknown payment method", r.get_data(as_text=True))
+
+
 class Dashboard(GrowthCase):
     def setUp(self):
         super().setUp()
