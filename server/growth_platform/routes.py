@@ -11,6 +11,7 @@ Ported from the Growth Platform's backend/run.py with its route bodies unchanged
 Data stays in the Growth Platform's own JSON files, in GROWTH_DATA_DIR (see core/store.py).
 """
 import base64
+import os
 import threading
 import time
 from datetime import datetime
@@ -34,7 +35,7 @@ growth_bp = Blueprint("growth", __name__, url_prefix=PREFIX)
 # What an unauthenticated CSP's browser must still be able to reach: the order page itself, its API routes, and the
 # two links a campaign email carries (open-pixel, /go/<token>). Everything else needs the console login.
 _PUBLIC_PATH_PREFIXES = ("/api/order-page/", "/pixel/", "/go/", "/assets/")
-_PUBLIC_PATHS = ("/order.html", "/order.js", "/style.css")
+_PUBLIC_PATHS = ("/order.html", "/order.js", "/style.css", "/payment-qr")
 
 # The dashboard and order page load Google Fonts and use inline onclick handlers, which the console's default
 # Content-Security-Policy (script-src 'self') would block. Same protections otherwise: no framing, no foreign scripts.
@@ -728,6 +729,40 @@ def _client_ip() -> str:
             or request.remote_addr or "unknown")
 
 
+# ---------------------------------------------------------------- payment QR
+# Finance's static UPI QR lives in GROWTH_DATA_DIR as payment-qr.png (or .jpg/.jpeg/.webp), not in the code, so
+# replacing the file swaps the QR without a rebuild. The order page offers "QR code se" ONLY with
+# ORDER_PAGE_QR_ENABLED=true AND an image: the QR is not in use yet, so by default CSPs see bank transfer only.
+# ORDER_PAGE_QR_IMAGE still overrides the image address.
+_QR_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+
+
+def _qr_file() -> Optional[Path]:
+    for ext in _QR_TYPES:
+        path = Path(store.DATA_DIR) / f"payment-qr{ext}"
+        if path.is_file():
+            return path
+    return None
+
+
+def _qr_settings() -> dict:
+    flag = (os.environ.get("ORDER_PAGE_QR_ENABLED") or "").strip().lower() in ("true", "1", "yes", "on")
+    path = _qr_file()
+    image = config.ORDER_PAGE_QR_IMAGE or (f"payment-qr?v={int(path.stat().st_mtime)}" if path else None)
+    enabled = flag and bool(image)
+    return {"enabled": enabled, "image": image if enabled else None}
+
+
+@growth_bp.get("/payment-qr")
+def payment_qr():
+    """Public (it is on the order page every CSP sees). 404 until finance's QR file is in GROWTH_DATA_DIR."""
+    path = _qr_file()
+    if path is None:
+        return jsonify({"error": "No payment QR uploaded"}), 404
+    return send_from_directory(str(path.parent), path.name, mimetype=_QR_TYPES[path.suffix],
+                               max_age=300)
+
+
 @growth_bp.get("/api/order-page/config")
 def order_page_config():
     """Static, non-secret display config the order page needs and has no
@@ -743,10 +778,7 @@ def order_page_config():
             "branch": config.BANK_BRANCH,
             "configured": config.ORDER_PAGE_BANK_DETAILS_SET,
         },
-        "qr": {
-            "enabled": config.ORDER_PAGE_QR_ENABLED,
-            "image": config.ORDER_PAGE_QR_IMAGE if config.ORDER_PAGE_QR_ENABLED else None,
-        },
+        "qr": _qr_settings(),
         "products": {pid: {"id": p.id, "name": p.name, "price": p.price}
                      for pid, p in config.PRODUCTS.items()},
         # Fixed list, not free text - see orderpage.delivery_states() for
