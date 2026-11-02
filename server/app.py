@@ -16,6 +16,7 @@ import routes_campaigns  # noqa: F401  (adds the Email Campaigns pages and JSON 
 import routes_learning  # noqa: F401  (diagnosis outcomes page and the "was this right?" answers)
 import routes_ai  # noqa: F401  (AI drafting assistant endpoints and the AI quality pages)
 from campaign_public import public_bp
+from growth_platform import growth_bp  # the CSP Growth Platform (device sales drip, order page, orders) at /growth
 from security import get_csrf_token, verify_csrf
 from datetime import datetime, timezone, timedelta
 
@@ -99,6 +100,7 @@ def create_app() -> Flask:
     app.register_blueprint(api_bp)
     app.register_blueprint(update_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(growth_bp)
 
     app.jinja_env.globals["csrf_token"] = get_csrf_token
 
@@ -187,6 +189,12 @@ if os.environ.get("CSP_MONITOR_CAMPAIGN_WORKER") == "1":
     from campaigns import worker as _campaign_worker
     from db import get_connection as _get_connection
     _campaign_worker.start(_get_connection, int(os.environ.get("CAMPAIGN_TICK_SECONDS") or 60))
+
+# Opt-in background loops of the merged Growth Platform (order timers, daily Calling Sheet refresh, scheduled drip
+# batches - which only compose until GROWTH_EMAIL_MODE=live). Off by default for the same reason as above.
+if os.environ.get("CSP_MONITOR_GROWTH_WORKER") == "1":
+    from growth_platform import start_background as _start_growth_background
+    _start_growth_background()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5100))

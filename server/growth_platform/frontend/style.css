@@ -1,0 +1,652 @@
+:root {
+  /* Matched to eko.in/sbi_kiosk: a white page, cream panels, amber accents and
+     grey (not black) type. The old palette was an admin-console dark shell -
+     this is the public site's light, roomy language instead. */
+  --bg: #ffffff;
+  --bg-tint: #fffcf6;      /* the cream the site's panels/menus sit on */
+  --card: #ffffff;
+  --ink: #3f3f3f;          /* headings are grey on eko.in, never pure black */
+  --ink-2: #6b6b6b;
+  --ink-3: #9a9a9a;
+  --line: #ece7dd;
+  --line-warm: #f5ead5;    /* the hairline around cream panels */
+  --border: rgba(63,63,63,.08);
+
+  /* Eko Kiosk brand, pulled live from kiosk.eko.in's own CSS custom
+     properties (--primary/--secondary/--saffron/--forest/--cream/--ink). */
+  --brand: #0092cc;        /* kiosk.eko.in --primary */
+  --brand-dark: #00668f;   /* kiosk.eko.in --secondary, also its header bg */
+  --brand-deep: #00546e;   /* darker still, for text-on-light contrast */
+  --brand-soft: #e6f4fa;
+  --brand-on: #ffffff;     /* kiosk.eko.in sets its CTAs in white too */
+
+  --saffron: #efb839;      /* kiosk.eko.in --saffron, its secondary accent */
+  --saffron-dark: #e69b1a;
+  --forest: #1d5e43;       /* kiosk.eko.in --forest, used sparingly for "earning" cues */
+
+  /* categorical palette, fixed order - never cycled, never reassigned per-value */
+  --cat-1: #2a78d6; /* blue    - Micro ATM */
+  --cat-2: #eb6834; /* orange  - Passbook Printer */
+  --cat-3: #1baf7a; /* aqua */
+  --cat-4: #eda100; /* yellow */
+  --cat-5: #e87ba4; /* magenta */
+  --cat-6: #008300; /* green */
+  --cat-7: #4a3aa7; /* violet  - programme value */
+  --cat-8: #e34948; /* red */
+
+  /* status - fixed, reserved meaning, never reused as "series N" */
+  --good: #0ca30c;
+  --good-soft: #e9f9ea;
+  --warn: #b8790a;
+  --warn-soft: #fdf3de;
+  --serious: #c85f39;
+  --serious-soft: #fbeae2;
+  --bad: #d03b3b;
+  --bad-soft: #fbe9e9;
+
+  /* Soft and wide, like the site's dropdown panels - not the tight admin shadow */
+  --shadow-sm: 0 1px 2px rgba(63,63,63,.04);
+  --shadow: 0 2px 6px rgba(63,63,63,.04), 0 12px 32px -12px rgba(63,63,63,.13);
+  --shadow-lg: 0 18px 48px -14px rgba(63,63,63,.22);
+  --radius: 18px;
+  --radius-sm: 12px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  /* Inter first - the face kiosk.eko.in itself loads. Pulled from Google
+     Fonts in index.html, but never depended on: if that request fails
+     (offline box, blocked egress) the system stack below takes over and
+     nothing breaks. */
+  font: 14px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { margin: 0; letter-spacing: -.02em; font-family: "Plus Jakarta Sans", Inter, -apple-system, sans-serif; }
+
+/* ══════════════════════════════ top navigation ═══════════════════════════
+   kiosk.eko.in's own header: navy, sticky, logo left, sections through the
+   middle, live-mode + primary action right. The Eko Kiosk logomark is cut
+   for a dark ground (its wordmark is white), so the bar stays navy to match
+   the real site rather than the page's cream/white body. */
+.topnav {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--brand-dark); border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.topnav-inner {
+  max-width: 1420px; margin: 0 auto; padding: 0 32px;
+  display: flex; align-items: center; gap: 26px; height: 74px;
+}
+.logo { flex-shrink: 0; display: grid; place-items: center; }
+.logo img { height: 40px; width: auto; display: block; }
+
+.nav { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; }
+.nav::-webkit-scrollbar { height: 0; }
+.navitem {
+  position: relative; display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: 0; cursor: pointer; white-space: nowrap;
+  color: rgba(255,255,255,.72); font: inherit; font-size: 14px; font-weight: 500;
+  padding: 9px 13px; border-radius: 9px;
+  transition: color .14s, background .14s;
+}
+.navitem:hover { color: #fff; background: rgba(255,255,255,.08); }
+/* Saffron underline on the live section - kiosk.eko.in's own secondary accent,
+   marking active nav with a rule under the word rather than a filled pill. */
+.navitem.active { color: #fff; font-weight: 700; }
+.navitem.active::after {
+  content: ""; position: absolute; left: 13px; right: 13px; bottom: -1px;
+  height: 3px; border-radius: 3px 3px 0 0; background: var(--saffron);
+}
+.navitem em {
+  font-style: normal; font-size: 10.5px; font-weight: 700; padding: 1px 7px;
+  border-radius: 20px; background: rgba(255,255,255,.12); color: #fff;
+  border: 1px solid rgba(255,255,255,.16);
+}
+.navitem em:empty { display: none; }
+.navitem em.warn { background: var(--saffron); color: #4a3200; border-color: var(--saffron-dark); }
+
+.topnav-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+
+/* page heading band, sitting on the cream tint the site uses behind its hero */
+.pagehead { background: var(--bg-tint); border-bottom: 1px solid var(--line-warm); }
+.pagehead-inner { max-width: 1420px; margin: 0 auto; padding: 30px 32px 32px; }
+.pagehead h1 { font-size: 31px; font-weight: 700; color: var(--ink); }
+.pagehead .crumb { margin: 7px 0 0; font-size: 14.5px; color: var(--ink-2); }
+
+.pagefoot {
+  max-width: 1420px; width: 100%; margin: 0 auto; padding: 22px 32px 40px;
+  font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--line);
+}
+.pagefoot a { color: var(--brand-deep); text-decoration: none; border-bottom: 1px solid var(--line-warm); }
+.pagefoot a:hover { color: var(--brand-dark); }
+.pagefoot b { color: var(--ink-2); }
+
+/* ──────────────────────────────── main ───────────────────────────────── */
+.main { min-height: calc(100vh - 74px); display: flex; flex-direction: column; }
+.scroll { flex: 1; max-width: 1420px; width: 100%; margin: 0 auto; padding: 26px 32px 20px; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  border: 1px solid transparent; border-radius: 10px; padding: 11px 22px;
+  font: inherit; font-size: 14px; font-weight: 700; letter-spacing: -.005em;
+  transition: background .14s, box-shadow .14s, opacity .14s, transform .1s;
+}
+.btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+/* White text on the primary blue fill - same weight (600), radius (12px) and
+   fill kiosk.eko.in uses on its own "Get Started" CTA. */
+.btn.primary {
+  background: var(--brand); color: var(--brand-on);
+  box-shadow: 0 4px 14px rgba(0,146,204,.34);
+}
+.btn.primary:hover { background: var(--brand-dark); box-shadow: 0 6px 20px rgba(0,146,204,.46); transform: translateY(-1px); }
+.btn.ghost { background: #fff; border-color: var(--line); color: var(--ink-2); }
+.btn.ghost:hover { border-color: #ded7c9; background: #faf7f2; }
+.btn:disabled { opacity: .5; cursor: default; transform: none !important; }
+
+/* send mode indicator - the difference between a rehearsal and 100 real emails */
+.sendbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.modepill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+}
+.modepill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.modepill.dry  { background: #f1efe9; color: var(--ink-3); }
+.modepill.live { background: var(--bad-soft); color: var(--bad); }
+.mini {
+  cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--ink-2);
+  font: inherit; font-size: 12px; font-weight: 650; padding: 5px 12px; border-radius: 8px;
+  transition: all .14s;
+}
+.mini:hover { border-color: #ded7c9; background: #faf7f2; }
+.mini.yes:hover { border-color: var(--good); color: var(--good); background: var(--good-soft); }
+.mini.no:hover  { border-color: var(--bad);  color: var(--bad);  background: var(--bad-soft); }
+
+/* ─────────────────────────────── alert ───────────────────────────────── */
+.alert {
+  display: flex; gap: 13px; padding: 17px 20px; border-radius: var(--radius);
+  background: var(--warn-soft); border: 1px solid #f0dca8; margin-bottom: 18px;
+  font-size: 13.2px; line-height: 1.6; color: #6b4a08;
+}
+.alert.ok { background: var(--good-soft); border-color: #b7e6b8; color: #0d5c0d; }
+.alert .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-top: 7px; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(184,121,10,.15); }
+.alert.ok .dot { background: var(--good); box-shadow: 0 0 0 3px rgba(12,163,12,.15); }
+.alert b { font-weight: 700; }
+.alert code { background: rgba(11,11,11,.06); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+/* ─────────────────────────────── cards ───────────────────────────────── */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.stat {
+  position: relative; overflow: hidden;
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 19px 21px 19px 24px; display: flex; align-items: center; gap: 18px;
+  transition: box-shadow .18s, transform .18s;
+}
+.stat:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+.stat::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--accent, var(--brand));
+}
+.stat.accent-matm     { --accent: var(--cat-1); }
+.stat.accent-printer  { --accent: var(--cat-2); }
+.stat.accent-revenue  { --accent: var(--cat-7); }
+.stat.accent-neutral  { --accent: #c9c7bd; }
+.stat.accent-good     { --accent: var(--good); }
+.stat.accent-warn     { --accent: var(--warn); }
+
+.ring { width: 92px; height: 92px; flex-shrink: 0; }
+.ring circle { fill: none; stroke-linecap: round; }
+.ring .track { stroke: #efeade; }
+.ring .val { stroke: var(--accent, var(--brand)); transition: stroke-dasharray .7s cubic-bezier(.4,0,.2,1); }
+.ring .tick { stroke: var(--ink); stroke-width: 2.5; }
+.ring text { font: 700 20px -apple-system, "Segoe UI", sans-serif; fill: var(--ink); text-anchor: middle; letter-spacing: -.02em; }
+.ring text.unit { font-size: 9.5px; font-weight: 650; fill: var(--ink-3); letter-spacing: .04em; }
+
+.stat-body { min-width: 0; }
+.stat-label { font-size: 11.5px; font-weight: 650; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; }
+.stat-main { font-size: 24px; font-weight: 700; letter-spacing: -.02em; margin: 4px 0 5px; font-variant-numeric: normal; }
+.stat-note { font-size: 12.2px; color: var(--ink-2); line-height: 1.55; }
+.stat-note b { color: var(--ink); font-weight: 650; }
+.chip {
+  display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 11px; font-weight: 700;
+  background: var(--warn-soft); color: var(--warn); margin-left: 4px;
+}
+
+/* ─────────────────────────────── panels ──────────────────────────────── */
+/* The site's panels are cream-bordered with a wide soft shadow and plenty of
+   internal air - not the tight bordered boxes of an admin table view. */
+.card {
+  background: var(--card); border-radius: var(--radius);
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+  overflow: hidden; margin-bottom: 16px;
+}
+.card-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 24px 26px 18px;
+}
+.card-head > div:first-child { flex: 1; min-width: 0; }
+.card-head h2 { font-size: 17px; font-weight: 700; color: var(--ink); }
+.card-head .sub { margin: 6px 0 0; font-size: 13.2px; color: var(--ink-3); line-height: 1.55; max-width: 96ch; }
+.card-head .sub b { color: var(--ink-2); font-weight: 650; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 1080px) { .grid2 { grid-template-columns: 1fr; } }
+.hidden { display: none !important; }
+
+#pane-targets > .card + .card { margin-top: 14px; }
+
+/* A collapsible card - the full ranked/scored list, tucked away by default
+   so the page opens on "who gets an email" instead of a dense scoring
+   table. Native <details>/<summary>, no extra JS needed to toggle it. */
+.details-card > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 19px 22px 15px; cursor: pointer; list-style: none;
+}
+.details-card > summary::-webkit-details-marker { display: none; }
+.details-card > summary::after {
+  content: "Show ▾"; font-size: 12px; font-weight: 650; color: var(--ink-3);
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; flex-shrink: 0;
+}
+.details-card[open] > summary::after { content: "Hide ▴"; }
+.details-card[open] > summary { border-bottom: 1px solid var(--line); }
+
+.seg { display: flex; background: #f2eee5; border-radius: 10px; padding: 3px; flex-shrink: 0; }
+.segbtn {
+  background: transparent; border: 0; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 650;
+  color: var(--ink-3); padding: 6px 14px; border-radius: 8px; transition: all .14s;
+}
+.segbtn.active { background: #fff; color: var(--ink); box-shadow: var(--shadow-sm); }
+
+/* ─────────────────────────────── tables ──────────────────────────────── */
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--ink-3); padding: 10px 18px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  background: #fcfaf6;
+}
+td { padding: 12px 18px; border-bottom: 1px solid #f3efe6; vertical-align: middle; font-size: 13px; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr { transition: background .1s; }
+tbody tr:hover { background: #fbf9f4; }
+.r { text-align: right; }
+td.r { font-variant-numeric: tabular-nums; }
+.who { font-weight: 650; color: var(--ink); }
+.dim { color: var(--ink-3); font-size: 11.5px; margin-top: 1px; }
+.next-flag { color: var(--warn); font-size: 11.5px; font-weight: 650; }
+
+.rank {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px;
+  background: var(--brand-soft); color: var(--brand-deep); font-size: 12.5px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.rank.top { background: linear-gradient(180deg, var(--brand), var(--brand-dark)); color: var(--brand-on); }
+
+.tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 650; white-space: nowrap; }
+.tag.STRONG { background: var(--good-soft); color: var(--good); }
+.tag.MID    { background: var(--brand-soft); color: var(--brand-deep); }
+/* LOW moved off --warn once the brand became amber: --warn-soft/--warn and
+   --brand-soft/--brand-deep are both pale-amber-on-brown and MID vs LOW became
+   nearly indistinguishable side by side in the bands table. --serious was
+   defined-but-unused and is the right step anyway, since the band scale is an
+   escalation: STRONG green -> MID amber -> LOW orange-red -> REVIVE grey.
+   LOW is also the band blocked outright from the printer, so the stronger
+   tone is accurate, not just decorative. */
+.tag.LOW    { background: var(--serious-soft); color: var(--serious); }
+.tag.REVIVE, .tag.UNKNOWN { background: #f2eee5; color: var(--ink-3); }
+.tag.hot    { background: #fdece3; color: #b3491a; }
+.tag.quiet  { background: #f2eee5; color: var(--ink-3); font-weight: 550; }
+
+/* per-row send status in the target queue - answers "who actually gets an
+   email if I click send right now", not just the aggregate count above it */
+.tag.send-next   { background: var(--good-soft); color: var(--good); }
+.tag.send-held   { background: var(--bad-soft); color: var(--bad); }
+.tag.send-queued { background: #f2eee5; color: var(--ink-3); font-weight: 550; }
+
+/* order status pills - reserved status colors, never reused as decoration */
+/* SUBMITTED is neutral, not a warning: it's the normal "waiting on finance
+   to type a remark in the sheet" state now, not an error state. A genuine
+   problem (e.g. finance marked credited but the amount doesn't match) shows
+   up as a remark under the tag instead - see order.remarks. */
+.tag.SUBMITTED         { background: #f2eee5; color: var(--ink-2); }
+.tag.PAYMENT_VERIFIED  { background: var(--brand-soft); color: var(--brand-deep); }
+.tag.DISPATCHED        { background: #efecfa; color: var(--cat-7); }
+.tag.DELIVERED         { background: var(--good-soft); color: var(--good); }
+.tag.REJECTED          { background: var(--bad-soft); color: var(--bad); }
+
+.empty { padding: 48px 24px; text-align: center; }
+.empty .big { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 5px; }
+.empty .small { font-size: 13px; color: var(--ink-3); max-width: 52ch; margin: 0 auto; line-height: 1.6; }
+
+.feed { list-style: none; margin: 0; padding: 4px 22px 16px; max-height: 340px; overflow-y: auto; }
+.feed li { padding: 10px 0; border-bottom: 1px solid #f3efe6; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.feed li:last-child { border-bottom: 0; }
+.feed b { color: var(--ink); font-weight: 650; }
+.feed .t { color: var(--ink-3); font-size: 11.5px; }
+
+.toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: #fff; padding: 11px 20px; border-radius: 10px;
+  font-size: 13px; font-weight: 550; box-shadow: var(--shadow-lg); z-index: 50;
+}
+
+@media (max-width: 820px) {
+  body { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: static; }
+  .nav { flex-direction: row; overflow-x: auto; padding: 0 10px 12px; }
+  .navitem { white-space: nowrap; }
+  .navitem.active::before { display: none; }
+  .sidefoot { display: none; }
+  .main { height: auto; }
+}
+
+/* ════════════════════════════════ charts ═══════════════════════════════════
+   All hand-drawn - no charting library, no external script. Colours come from
+   the categorical tokens so a product keeps ONE identity everywhere it appears
+   (Micro ATM blue, Passbook Printer orange), the same pairing the stat cards
+   and the queue tabs already use. */
+.chartgrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  gap: 14px; margin-bottom: 14px;
+  /* Cards size to their own content instead of stretching to match the tallest
+     in the row - a short chart next to a tall one was leaving a large empty
+     panel that read as a failed render. */
+  align-items: start;
+}
+.chartgrid > .card { margin-bottom: 0; }
+.chartgrid + .chartgrid { margin-top: 0; }
+.chart-empty {
+  padding: 26px 20px; text-align: center; color: var(--ink-3); font-size: 12.5px;
+  line-height: 1.6; background: var(--bg); border-radius: var(--radius-sm);
+  border: 1px dashed var(--line);
+}
+
+/* ── coverage bars ── */
+.cov-row { padding: 13px 0; border-bottom: 1px solid var(--line); }
+.cov-row:last-child { border-bottom: 0; padding-bottom: 2px; }
+.cov-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 7px; }
+.cov-name { font-size: 13.5px; font-weight: 650; }
+.cov-num { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cov-num b { font-size: 15px; color: var(--ink); }
+.cov-track { height: 9px; background: #efeade; border-radius: 20px; overflow: hidden; }
+.cov-fill { height: 100%; border-radius: 20px; transition: width .6s cubic-bezier(.4,0,.2,1); }
+.cov-fill.matm    { background: var(--cat-1); }
+.cov-fill.printer { background: var(--cat-2); }
+.cov-foot {
+  display: flex; justify-content: space-between; gap: 12px; margin-top: 6px;
+  font-size: 11.5px; color: var(--ink-3);
+}
+.cov-gap  { color: var(--serious); font-weight: 650; }
+.cov-done { color: var(--good); font-weight: 650; }
+
+/* ── funnel ── */
+.funnel { display: flex; flex-direction: column; gap: 2px; }
+.fn-row { padding: 3px 0; }
+.fn-label { font-size: 12.5px; color: var(--ink-2); margin-bottom: 4px; }
+.fn-barwrap { display: flex; align-items: center; gap: 10px; }
+/* The bar lives in its own flexible track and the count gets a reserved column.
+   Previously the bar itself was the flex child, so a 100%-wide bar (the widest
+   stage always is) pushed its own count out of view. */
+.fn-track { flex: 1; min-width: 0; }
+.fn-bar {
+  height: 21px; border-radius: 5px; min-width: 0;
+  background: linear-gradient(90deg, var(--brand), var(--brand-dark));
+  transition: width .6s cubic-bezier(.4,0,.2,1);
+}
+.fn-count {
+  font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;
+  width: 52px; text-align: right; flex-shrink: 0;
+}
+.fn-conv { font-size: 11px; color: var(--ink-3); margin-top: 2px; min-height: 13px; }
+/* A stage the platform physically cannot measure: hatched, count suppressed.
+   Showing a confident "0" here would be a lie of omission. */
+.fn-blind .fn-bar {
+  background: repeating-linear-gradient(45deg, #e6e0d3 0 5px, #f2eee5 5px 10px);
+  width: 100%; opacity: .75;
+}
+.fn-blind .fn-count { color: var(--ink-3); font-weight: 600; }
+.fn-tagblind {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--serious); background: var(--serious-soft); padding: 1px 7px; border-radius: 20px;
+}
+
+/* ── vertical bars (sends per day) ── */
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 190px; padding-top: 6px; }
+.bar-col { display: flex; flex-direction: column; align-items: center; height: 100%; min-width: 0; }
+.bar-val {
+  font-size: 10.5px; font-weight: 700; color: var(--ink-2); height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.bar {
+  width: 100%; max-width: 34px; flex: 0 0 auto; border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, var(--brand), var(--brand-dark));
+  min-height: 2px; transition: height .6s cubic-bezier(.4,0,.2,1);
+}
+.bar-col { justify-content: flex-end; }
+.bar-x {
+  font-size: 9.5px; color: var(--ink-3); margin-top: 6px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+
+/* ── sequence spread ── */
+.touchlist { display: flex; flex-direction: column; gap: 7px; }
+.touch-row { display: flex; align-items: center; gap: 10px; }
+.touch-day {
+  font-size: 11.5px; color: var(--ink-3); width: 46px; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.touch-track { flex: 1; height: 15px; background: #f2eee5; border-radius: 4px; overflow: hidden; }
+.touch-fill {
+  height: 100%; border-radius: 4px; background: var(--brand);
+  transition: width .6s cubic-bezier(.4,0,.2,1);
+}
+.touch-n {
+  font-size: 12px; font-weight: 650; width: 38px; text-align: right; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── trend line ── */
+.trendsvg { width: 100%; height: 200px; display: block; overflow: visible; }
+.trend-grid { stroke: var(--line); stroke-width: 1; }
+.trend-ylab { font-size: 9.5px; fill: var(--ink-3); text-anchor: end; }
+.trend-line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.trend-line.matm    { stroke: var(--cat-1); }
+.trend-line.printer { stroke: var(--cat-2); }
+.legend { display: flex; gap: 18px; margin-top: 12px; font-size: 11.5px; color: var(--ink-2); }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.legend .dot { width: 9px; height: 9px; border-radius: 50%; }
+.legend .dot.matm    { background: var(--cat-1); }
+.legend .dot.printer { background: var(--cat-2); }
+
+/* An alert that is a real blocker, not a caution - see #trackingWarn */
+.alert.serious { background: var(--serious-soft); border-color: #f0c9b6; }
+.alert.serious .dot { background: var(--serious); box-shadow: 0 0 0 3px rgba(200,95,57,.15); }
+.sidefoot a { color: var(--brand); text-decoration: none; border-bottom: 1px solid rgba(251,177,27,.35); }
+.sidefoot a:hover { color: #ffc44d; }
+.sidefoot b { color: #d9d3c7; }
+
+/* chart bodies share the card's roomier gutter */
+#coverageBars, #funnelChart, #sendsChart, #touchChart, #trendChart { padding: 0 26px 24px; }
+.chart-empty { margin-top: 4px; }
+
+/* ══════════════════════════════ messages tab ═══════════════════════════
+   Per-CSP send/delivered/opened/failed status, across every channel -
+   status pills follow the same escalation logic as .tag.SUBMITTED etc.
+   above: neutral -> in-flight -> good, with failure as its own reserved
+   color, never reused as decoration elsewhere. */
+.stat.accent-bad { --accent: var(--bad); }
+
+.tag.sent      { background: #f2eee5; color: var(--ink-2); }
+.tag.delivered { background: var(--brand-soft); color: var(--brand-deep); }
+.tag.read      { background: var(--good-soft); color: var(--good); }
+.tag.failed    { background: var(--bad-soft); color: var(--bad); }
+
+/* "physically can't measure this yet" - same hatch language as .fn-blind
+   above, at cell scale instead of chart-bar scale */
+.blindswatch { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-3); font-weight: 600; }
+.blindswatch .hatch {
+  width: 26px; height: 9px; border-radius: 3px; flex-shrink: 0;
+  background: repeating-linear-gradient(45deg, #e6e0d3 0 4px, #f2eee5 4px 8px);
+}
+
+.chanpill {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 650;
+  padding: 2px 9px; border-radius: 20px; background: #f2eee5; color: var(--ink-2);
+}
+.chanpill.wa { background: #e5f6ec; color: #0d7a3e; }
+.chanpill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* day-group header row inside the message table */
+tr.daygroup td {
+  background: #fcfaf6; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--ink-3); padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+}
+tr.daygroup td b { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* per-channel accent on the row's leading edge, same idea as the stat
+   cards' left stripe, at table-row scale */
+td.chan-email { border-left: 3px solid #c9c4b4; }
+td.chan-wa    { border-left: 3px solid #0d7a3e; }
+
+.viewmsg { font-size: 12px; color: var(--brand-deep); text-decoration: none; border-bottom: 1px solid var(--line-warm); white-space: nowrap; }
+.viewmsg:hover { color: var(--brand-dark); }
+
+.msgsearch {
+  padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 13.5px; width: 240px; color: var(--ink);
+}
+.msgsearch::placeholder { color: var(--ink-3); }
+.headctrls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+.pager {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  padding: 12px 22px 18px; font-size: 12.5px; color: var(--ink-3);
+}
+.pager-btns { display: flex; gap: 5px; }
+.pagebtn.active { border-color: var(--brand); color: var(--brand-deep); background: var(--brand-soft); }
+.mini:disabled { opacity: .4; cursor: default; }
+.mini:disabled:hover { border-color: var(--line); background: #fff; }
+
+/* ══════════════════════ order source badge + detail drawer ═══════════════
+   Everything a CSP types on the self-serve order page (app/orderpage.py) is
+   stored on the order and, until this existed, shown nowhere: the Orders
+   table's 8 columns carry none of the address, contact or payment-method
+   fields. With config.ORDER_PAGE_SHEET_MIRROR_URL unset there is no sheet
+   row to fall back on either, so the shipping address lived only in
+   state.json. The badge below marks which path an order came through; the
+   drawer behind a row click carries the rest.
+
+   Named .ordersrc, not .chan, so it can't be confused with the messages
+   table's .chan-email/.chan-wa row accents above - different axis entirely
+   (that one is the outreach channel, this one is where the order came
+   from). */
+.ordersrc {
+  display: inline-block; padding: 1.5px 7px; border-radius: 5px; font-size: 10px;
+  font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  vertical-align: 1px; margin-left: 6px;
+}
+.ordersrc.page { background: var(--brand-soft); color: var(--brand-deep); }
+.ordersrc.form { background: #f2eee5; color: var(--ink-3); }
+
+/* Rows become clickable once there's somewhere to click through TO. The
+   override buttons keep working in place - see app.js's click handler. */
+#ordersTable tbody tr { cursor: pointer; }
+#ordersTable tbody tr.selected { background: var(--brand-soft); }
+#ordersTable tbody tr.selected:hover { background: #daeef7; }
+
+.scrim {
+  position: fixed; inset: 0; background: rgba(63, 63, 63, .28);
+  opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 50;
+}
+.scrim.open { opacity: 1; pointer-events: auto; }
+
+/* A drawer rather than more columns or an inline row-expand: the table
+   already scrolls horizontally on a laptop and the address alone needs four
+   more columns, while a row-expand pushes every other row off screen the
+   moment it opens - the wrong trade for a list you triage. */
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 94vw;
+  background: #fff; box-shadow: var(--shadow-lg); z-index: 51;
+  transform: translateX(100%); transition: transform .22s cubic-bezier(.4, 0, .2, 1);
+  display: flex; flex-direction: column;
+}
+.drawer.open { transform: translateX(0); }
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .scrim { transition: none; }
+}
+
+.dw-head { padding: 22px 26px 16px; border-bottom: 1px solid var(--line); background: #fcfaf6; }
+.dw-head .row1 { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dw-head h3 { font-size: 18px; font-weight: 800; }
+.dw-head .name { margin-top: 10px; font-size: 15px; font-weight: 650; color: var(--ink); }
+.dw-close {
+  border: 0; background: transparent; font-size: 22px; line-height: 1; color: var(--ink-3);
+  cursor: pointer; padding: 2px 8px; border-radius: 6px;
+}
+.dw-close:hover { background: #f1ede4; color: var(--ink); }
+.dw-body { overflow-y: auto; padding: 6px 26px 30px; flex: 1; }
+.dw-foot {
+  border-top: 1px solid var(--line); padding: 14px 26px; background: #fcfaf6;
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+
+.dw-sec { padding: 20px 0 4px; border-bottom: 1px solid #f3efe6; }
+.dw-sec:last-child { border-bottom: 0; }
+.dw-sec > h4 {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--ink-3); margin: 0 0 12px;
+}
+
+.kv { display: grid; grid-template-columns: 118px 1fr; gap: 7px 14px; font-size: 13px; margin-bottom: 14px; }
+.kv dt { color: var(--ink-3); font-size: 12px; padding-top: 1px; }
+.kv dd { margin: 0; color: var(--ink); word-break: break-word; }
+.kv dd.num { font-variant-numeric: tabular-nums; }
+.kv dd .sub2 { color: var(--ink-3); font-size: 11.5px; }
+
+/* One block, not five fields: ops pastes this into a courier system, so it
+   has to be copy-able in a single action. */
+.addr-block {
+  background: var(--bg-tint); border: 1px solid var(--line-warm); border-radius: var(--radius-sm);
+  padding: 13px 15px; font-size: 13.5px; line-height: 1.6; margin-bottom: 12px;
+}
+.addr-block .pin { font-variant-numeric: tabular-nums; font-weight: 650; }
+
+/* The honest empty state for a Google-Form order: addressLine/landmark/city
+   are genuinely null on those records (the form collects them but
+   config.RESPONSE_HEADER_MAP never mapped them), so this says where the
+   address actually is instead of printing em-dashes that would read as "the
+   CSP gave no address". */
+.not-captured {
+  background: #faf8f3; border: 1px dashed #ddd6c8; border-radius: var(--radius-sm);
+  padding: 13px 15px; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; margin-bottom: 12px;
+}
+.not-captured b { color: var(--ink); font-weight: 650; }
+
+.flagbox {
+  background: var(--warn-soft); border: 1px solid #eddcb4; border-radius: var(--radius-sm);
+  padding: 11px 14px; font-size: 12.5px; color: #7a5206; line-height: 1.55; margin-bottom: 12px;
+}
+.flagbox b { font-weight: 700; }
+
+.amt-ok  { color: var(--good); font-weight: 650; font-size: 11.5px; }
+.amt-bad { color: var(--bad);  font-weight: 650; font-size: 11.5px; }
+
+/* Status trail: reached stages filled, unreached hollow - the same "what's
+   already happened vs what's still coming" the Next column implies, laid out
+   so the whole life of the order reads at once. */
+.trail { list-style: none; margin: 0; padding: 0; }
+.trail li { position: relative; padding: 0 0 16px 20px; font-size: 12.5px; color: var(--ink-2); }
+.trail li::before {
+  content: ""; position: absolute; left: 0; top: 5px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--brand);
+}
+.trail li::after {
+  content: ""; position: absolute; left: 3.5px; top: 15px; bottom: 0; width: 1px; background: var(--line);
+}
+.trail li:last-child { padding-bottom: 0; }
+.trail li:last-child::after { display: none; }
+.trail li.pending::before { background: #fff; border: 1.5px solid var(--line); }
+.trail li b { color: var(--ink); font-weight: 650; }
+.trail li .t { color: var(--ink-3); font-size: 11.5px; }

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Eko CSP Device Order</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="assets/favicon.ico" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Plus+Jakarta+Sans:wght@700;800&display=swap" />
+<style>
+  :root{
+    --ink:#3f3f3f; --ink-2:#6b6b6b; --ink-3:#9a9a9a;
+    --line:#ece7dd; --line-warm:#f5ead5;
+    /* Eko Kiosk brand, pulled live from kiosk.eko.in's own CSS custom
+       properties (--primary/--secondary/--saffron). */
+    --brand:#0092cc; --brand-dark:#00668f; --brand-deep:#00546e; --brand-soft:#e6f4fa;
+    --good:#0ca30c; --good-soft:#e9f9ea; --bad:#d03b3b; --bad-soft:#fbe9e9;
+    --bg:#f7f4ee;
+  }
+  *{ box-sizing:border-box; }
+  html, body{ height:100%; }
+  body{
+    margin:0; background:var(--bg); font-family:"Inter",-apple-system,"Segoe UI",sans-serif;
+    color:var(--ink); display:flex; justify-content:center; padding:22px 14px;
+  }
+  .card{
+    width:100%; max-width:420px; background:#fff; border-radius:22px; overflow:hidden;
+    box-shadow:0 4px 24px rgba(63,63,63,.10); align-self:flex-start; margin-top:2vh;
+  }
+  /* kiosk.eko.in's own header colour - the logomark's wordmark is cut white,
+     so it needs a dark ground to read, same as on the real site. */
+  .bar{ background:var(--brand-dark); padding:14px 22px 12px; color:#fff; }
+  .bar img{ height:30px; display:block; }
+  .bar .sub{ font-size:12px; opacity:.85; margin-top:6px; }
+  .body{ padding:24px 22px 26px; min-height:320px; }
+
+  .step-badge{
+    display:inline-block; font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--brand-deep); background:var(--brand-soft); border:1px solid var(--line-warm);
+    padding:3px 9px; border-radius:20px; margin-bottom:16px;
+  }
+  h1{ font-size:16px; margin:0 0 6px; font-family:"Plus Jakarta Sans","Inter",sans-serif; }
+  .field-label{ font-size:12px; font-weight:650; color:var(--ink-2); margin:0 0 6px; }
+  .field-input{
+    width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px;
+    font:inherit; font-size:15px; color:var(--ink); margin-bottom:14px; background:#fff;
+  }
+  .field-input:focus{ outline:none; border-color:var(--brand); }
+  .field-input.otp{ letter-spacing:.5em; text-align:center; font-weight:700; font-size:18px; }
+  .hint{ font-size:11.5px; color:var(--ink-3); margin:-8px 0 16px; line-height:1.5; }
+  select.field-input{ appearance:none; background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='%239a9a9a' stroke-width='2' fill='none'/></svg>"); background-repeat:no-repeat; background-position:right 14px center; padding-right:36px; }
+  .field-row{ display:flex; gap:10px; }
+  .field-row > div{ flex:1; min-width:0; }
+  .opt-tag{ font-size:10px; color:var(--ink-3); font-weight:400; text-transform:none; letter-spacing:0; }
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:13px 18px; border-radius:10px; border:1.5px solid var(--line); background:#fff;
+    font:inherit; font-size:15px; font-weight:700; color:var(--ink-2); cursor:pointer; width:100%;
+  }
+  .btn.primary{ background:var(--brand); border-color:var(--brand); color:#fff; }
+  .btn.primary:hover{ background:var(--brand-dark); }
+  .btn.ghost{ background:#fff; margin-top:9px; }
+  .btn:disabled{ opacity:.45; cursor:default; }
+
+  .profile-card{ background:#fffcf6; border:1px solid var(--line-warm); border-radius:14px; padding:17px 17px 15px; margin-bottom:15px; }
+  .profile-row{ display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; border-bottom:1px dashed #ece0c4; font-size:13.5px; }
+  .profile-row:last-child{ border-bottom:none; }
+  .profile-row .k{ color:var(--ink-3); font-size:11.5px; }
+  .profile-row .v{ color:var(--ink); font-weight:650; text-align:right; }
+  .profile-name{ font-size:18px; font-weight:900; color:var(--ink); margin-bottom:2px; }
+  .profile-code{ font-size:12px; color:var(--brand-deep); font-weight:700; margin-bottom:12px; }
+
+  .product-opt{
+    display:flex; justify-content:space-between; align-items:center; padding:14px 15px;
+    border:1.5px solid var(--line); border-radius:12px; margin-bottom:10px; cursor:pointer;
+  }
+  .product-opt.selected{ border-color:var(--brand); background:var(--brand-soft); }
+  .product-opt.blocked{ opacity:.55; cursor:not-allowed; background:#faf9f6; }
+  .product-opt .pname{ font-weight:700; font-size:14px; color:var(--ink); }
+  .product-opt .pprice{ font-weight:900; font-size:14.5px; color:var(--brand-deep); }
+  .product-opt .pblock{ font-size:10.5px; color:var(--ink-3); font-weight:400; display:block; margin-top:2px; }
+
+  .amount-box{ background:#fffcf6; border:1px solid var(--line-warm); border-radius:12px; padding:15px 16px; margin:15px 0; text-align:center; }
+  .amount-box .k{ font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.05em; }
+  .amount-box .v{ font-size:27px; font-weight:900; color:var(--ink); margin-top:2px; }
+
+  .bank-box{ background:#f9f7f2; border:1px solid var(--line); border-radius:12px; padding:6px 14px; margin-bottom:15px; }
+  .bank-row{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:9px 0; border-bottom:1px dashed #e4ded1; }
+  .bank-row:last-child{ border-bottom:none; }
+  .bank-row .bk{ font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.04em; font-weight:700; flex-shrink:0; padding-top:2px; }
+  .bank-row .bv{ font-size:13.5px; color:var(--ink); font-weight:650; text-align:right; display:flex; align-items:center; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+  .bank-row .bv.mono{ font-family:ui-monospace,Consolas,monospace; letter-spacing:.02em; }
+  .bank-row .bv.small{ font-size:11.5px; font-weight:400; color:var(--ink-2); line-height:1.5; }
+  .bank-copy{
+    border:1px solid var(--brand); background:#fff; color:var(--brand-deep);
+    font:inherit; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; cursor:pointer; flex-shrink:0;
+  }
+  .bank-copy:hover{ background:var(--brand); color:#fff; }
+
+  .amt-callout{
+    background:var(--brand-soft); border:1.5px solid var(--brand); border-radius:12px;
+    padding:13px 15px; margin-bottom:16px; text-align:center;
+  }
+  .amt-callout .ac-t{ font-size:11.5px; color:var(--brand-deep); font-weight:650; margin-bottom:5px; }
+  .amt-callout .ac-v{ display:flex; align-items:center; justify-content:center; gap:10px; }
+  .amt-callout .ac-v span{ font-size:27px; font-weight:900; color:var(--ink); }
+  .amt-callout .ac-copy{
+    border:1px solid var(--brand); background:#fff; color:var(--brand-deep);
+    font:inherit; font-size:11px; font-weight:700; padding:5px 11px; border-radius:7px; cursor:pointer;
+  }
+  .amt-callout .ac-w{ font-size:10.5px; color:var(--brand-deep); margin-top:7px; line-height:1.45; }
+
+  .pay-opt{
+    display:flex; align-items:center; gap:12px; padding:13px 14px;
+    border:1.5px solid var(--line); border-radius:12px; margin-bottom:10px; cursor:pointer;
+  }
+  .pay-opt.selected{ border-color:var(--brand); background:var(--brand-soft); }
+  .pay-opt .pi{ font-size:19px; width:28px; text-align:center; flex-shrink:0; }
+  .pay-opt .pn{ font-weight:700; font-size:14px; color:var(--ink); }
+  .pay-opt .pd{ font-size:11px; color:var(--ink-3); margin-top:2px; }
+
+  .success{ text-align:center; padding:20px 4px 6px; }
+  .success .tick{ width:56px; height:56px; border-radius:50%; background:var(--good-soft); color:var(--good); display:grid; place-items:center; font-size:28px; margin:0 auto 16px; }
+  .success h3{ font-size:16px; margin:0 0 8px; }
+  .success p{ font-size:13px; color:var(--ink-2); line-height:1.6; margin:0 0 6px; }
+
+  .err{ background:var(--bad-soft); border:1px solid #f0c6c6; color:#8a2b2b; border-radius:10px; padding:11px 13px; font-size:12.5px; margin-bottom:14px; line-height:1.5; }
+  .spin{
+    width:26px; height:26px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--brand);
+    animation:spin .8s linear infinite; margin:24px auto;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .loading-wrap{ text-align:center; padding:20px 0; color:var(--ink-3); font-size:13px; }
+
+  .footer-note{ text-align:center; font-size:11px; color:var(--ink-3); margin-top:14px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="bar">
+      <img src="assets/eko-kiosk-logo.svg" alt="Eko Kiosk" />
+      <div class="sub" id="screenSub">Device Order</div>
+    </div>
+    <div class="body" id="screenBody">
+      <div class="loading-wrap"><div class="spin"></div>Loading...</div>
+    </div>
+  </div>
+  <script src="order.js"></script>
+</body>
+</html>
