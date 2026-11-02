@@ -1,0 +1,454 @@
+{
+ "version": "golden-v1",
+ "note": "Deterministic cases: every supported occasion x four device sets. Graders are programmatic (campaigns/ai/evals.py).",
+ "cases": [
+  {
+   "id": "01-gps",
+   "occasion": "Makar Sankranti",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "02-printer",
+   "occasion": "Makar Sankranti",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "03-matm+biometric",
+   "occasion": "Makar Sankranti",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "04-matm+printer+gps+biometric",
+   "occasion": "Makar Sankranti",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "05-gps",
+   "occasion": "Republic Day",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "06-printer",
+   "occasion": "Republic Day",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "07-matm+biometric",
+   "occasion": "Republic Day",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "08-matm+printer+gps+biometric",
+   "occasion": "Republic Day",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "09-gps",
+   "occasion": "Holi",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "10-printer",
+   "occasion": "Holi",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "11-matm+biometric",
+   "occasion": "Holi",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "12-matm+printer+gps+biometric",
+   "occasion": "Holi",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "13-gps",
+   "occasion": "Eid-ul-Fitr",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "14-printer",
+   "occasion": "Eid-ul-Fitr",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "15-matm+biometric",
+   "occasion": "Eid-ul-Fitr",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "16-matm+printer+gps+biometric",
+   "occasion": "Eid-ul-Fitr",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "17-gps",
+   "occasion": "Baisakhi",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "18-printer",
+   "occasion": "Baisakhi",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "19-matm+biometric",
+   "occasion": "Baisakhi",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "20-matm+printer+gps+biometric",
+   "occasion": "Baisakhi",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "21-gps",
+   "occasion": "Akshaya Tritiya",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "22-printer",
+   "occasion": "Akshaya Tritiya",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "23-matm+biometric",
+   "occasion": "Akshaya Tritiya",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "24-matm+printer+gps+biometric",
+   "occasion": "Akshaya Tritiya",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "25-gps",
+   "occasion": "Eid-ul-Adha",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "26-printer",
+   "occasion": "Eid-ul-Adha",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "27-matm+biometric",
+   "occasion": "Eid-ul-Adha",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "28-matm+printer+gps+biometric",
+   "occasion": "Eid-ul-Adha",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "29-gps",
+   "occasion": "Independence Day",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "30-printer",
+   "occasion": "Independence Day",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "31-matm+biometric",
+   "occasion": "Independence Day",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "32-matm+printer+gps+biometric",
+   "occasion": "Independence Day",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "33-gps",
+   "occasion": "Rakshabandhan",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "34-printer",
+   "occasion": "Rakshabandhan",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "35-matm+biometric",
+   "occasion": "Rakshabandhan",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "36-matm+printer+gps+biometric",
+   "occasion": "Rakshabandhan",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "37-gps",
+   "occasion": "Ganesh Chaturthi",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "38-printer",
+   "occasion": "Ganesh Chaturthi",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "39-matm+biometric",
+   "occasion": "Ganesh Chaturthi",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "40-matm+printer+gps+biometric",
+   "occasion": "Ganesh Chaturthi",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "41-gps",
+   "occasion": "Navratri / Dussehra",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "42-printer",
+   "occasion": "Navratri / Dussehra",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "43-matm+biometric",
+   "occasion": "Navratri / Dussehra",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "44-matm+printer+gps+biometric",
+   "occasion": "Navratri / Dussehra",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "45-gps",
+   "occasion": "Dhanteras / Diwali",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "46-printer",
+   "occasion": "Dhanteras / Diwali",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "47-matm+biometric",
+   "occasion": "Dhanteras / Diwali",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "48-matm+printer+gps+biometric",
+   "occasion": "Dhanteras / Diwali",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "49-gps",
+   "occasion": "Chhath Puja",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "50-printer",
+   "occasion": "Chhath Puja",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "51-matm+biometric",
+   "occasion": "Chhath Puja",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "52-matm+printer+gps+biometric",
+   "occasion": "Chhath Puja",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "53-gps",
+   "occasion": "Christmas / New Year",
+   "devices": [
+    "GPS"
+   ]
+  },
+  {
+   "id": "54-printer",
+   "occasion": "Christmas / New Year",
+   "devices": [
+    "PRINTER"
+   ]
+  },
+  {
+   "id": "55-matm+biometric",
+   "occasion": "Christmas / New Year",
+   "devices": [
+    "MATM",
+    "BIOMETRIC"
+   ]
+  },
+  {
+   "id": "56-matm+printer+gps+biometric",
+   "occasion": "Christmas / New Year",
+   "devices": [
+    "MATM",
+    "PRINTER",
+    "GPS",
+    "BIOMETRIC"
+   ]
+  }
+ ]
+}

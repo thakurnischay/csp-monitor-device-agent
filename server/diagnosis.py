@@ -7,6 +7,7 @@ into the database, and a malformed diagnosis can never break the heartbeat.
 import json
 from datetime import datetime, timezone
 
+import software
 from events import record_event
 
 DEVICES = ("printer", "microatm", "biometric", "gps")
@@ -93,9 +94,21 @@ def store(conn, csp_id, body, now=None):
         state = d.get("health_state") if d.get("health_state") in HEALTH_STATES else "DIAGNOSIS_REQUIRED"
         severity = d.get("severity") if d.get("severity") in SEVERITIES else "none"
         findings = [x for x in (clean_finding(f) for f in (d.get("findings") or [])[:6]) if x]
+        summary = _s(d.get("summary"), 200)
+        # The agent reports facts about each device's vendor software; the administrator's required versions decide
+        # whether that is a problem (not installed / out of date).
+        inventory = software.annotate(software.clean_inventory(d.get("software"), dev), software.requirements(conn))
+        sw_findings = [x for x in (clean_finding(f) for f in software.findings_for(inventory)) if x]
+        findings += sw_findings
+        if sw_findings:
+            order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
+            worst = min(sw_findings, key=lambda f: order[f["severity"]])
+            if state in ("HEALTHY", "UNVERIFIED") or order[worst["severity"]] < order[severity]:
+                state, severity, summary = "SOFTWARE_ISSUE", worst["severity"], worst["title"]
         detail = {"checked": _list(d.get("checked"), 12, 160), "not_checked": _list(d.get("not_checked"), 8, 240),
                   "notes": _list(d.get("notes"), 6, 240), "impact": _impact(d.get("impact")),
                   "verification": _verification(d.get("verification")),
+                  "software": inventory,
                   "actions_taken": [{"t": _s(a.get("t"), 40), "action": _s(a.get("action"), 30),
                                      "target": _s(a.get("target"), 80), "result": _s(a.get("result"), 160)}
                                     for a in (d.get("actions_taken") or [])[-5:] if isinstance(a, dict)]}
@@ -107,7 +120,7 @@ def store(conn, csp_id, body, now=None):
                    severity=excluded.severity, summary=excluded.summary, detail_json=excluded.detail_json,
                    last_healthy_at=COALESCE(excluded.last_healthy_at, device_diagnosis.last_healthy_at),
                    updated_at=excluded.updated_at""",
-            (csp_id, dev, state, severity, _s(d.get("summary"), 200), json.dumps(detail),
+            (csp_id, dev, state, severity, summary, json.dumps(detail),
              _s(d.get("last_healthy_at"), 40) or None, now))
         codes = []
         for f in findings:

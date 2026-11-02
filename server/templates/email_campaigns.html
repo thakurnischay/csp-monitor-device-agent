@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "_campaign_macros.html" import message_badge, campaign_badge, mode_badge, device_list %}
+{% block title %}Email Campaigns - CSP Device Monitor{% endblock %}
+{% block body %}
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <div>
+    <h1>Email Campaigns</h1>
+    <p class="note" style="margin-top:4px">Festival and occasion emails to operators who do not have a device. Only operators whose missing device is <strong>confirmed</strong> are emailed; unknown or conflicting ownership is held back for review.</p>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a class="btn btn-primary" href="{{ url_for('ui.email_campaign_new') }}">New campaign</a>
+    <a class="btn btn-outline" href="{{ url_for('ui.email_operators') }}">Operators &amp; opt-outs</a>
+    <a class="btn btn-outline" href="{{ url_for('ui.email_ai_quality') }}">AI quality</a>
+    <a class="btn btn-outline" href="{{ url_for('ui.email_campaigns', **request.args) }}">Refresh</a>
+  </div>
+</div>
+
+{% if settings.live_enabled %}
+<div class="banner banner-live"><strong>Live sending is switched on</strong> on this server. A campaign still needs an explicit, typed confirmation before any email is queued. Sends are capped at {{ settings.max_per_run }} per batch.</div>
+{% else %}
+<div class="banner banner-dry"><strong>Dry-run mode.</strong> No real email can be sent from here yet.{% if settings.blockers %} To enable live sending an administrator must set up the server: <ul style="margin:6px 0 0 18px">{% for b in settings.blockers %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}</div>
+{% endif %}
+
+{% if not summary.operators_imported %}
+<div class="panel"><strong>No operator data has been imported yet.</strong> <a href="{{ url_for('ui.email_operators') }}">Import the CSP Growth Platform's operator file</a> to see who is eligible.</div>
+{% endif %}
+
+<div class="kpi-grid">
+  <div class="kpi-card tint-ok"><div class="kpi-value">{{ summary.eligible_operators }}</div><div class="kpi-label">Eligible operators</div><div class="note">lack at least one confirmed device{% if summary.review_operators %} &middot; {{ summary.review_operators }} need review{% endif %}</div></div>
+  <div class="kpi-card"><div class="kpi-value">{{ summary.emails_accepted }}</div><div class="kpi-label">Emails sent (accepted by mail server)</div><div class="note">accepted is not the same as delivered</div></div>
+  <div class="kpi-card {% if summary.delivered_confirmed %}tint-ok{% endif %}"><div class="kpi-value">{{ summary.delivered_confirmed }}</div><div class="kpi-label">Delivered (confirmed)</div><div class="note">{% if summary.delivery_confirmation_available %}from provider delivery events{% else %}not available: no delivery receipts are configured{% endif %}</div></div>
+  <div class="kpi-card {% if summary.failed or summary.bounced %}tint-bad{% endif %}"><div class="kpi-value">{{ summary.failed }}</div><div class="kpi-label">Failed attempts</div><div class="note">{{ summary.bounced }} bounced{% if summary.needs_review %} &middot; {{ summary.needs_review }} need review{% endif %}</div></div>
+  <div class="kpi-card {% if summary.pending_queued %}tint-amber{% endif %}"><div class="kpi-value">{{ summary.pending_queued }}</div><div class="kpi-label">Pending / queued</div></div>
+  <div class="kpi-card"><div class="kpi-value">{{ summary.campaigns }}</div><div class="kpi-label">Campaigns</div><div class="note">{{ summary.campaigns_launched }} launched</div></div>
+  <div class="kpi-card"><div class="kpi-value">{{ summary.unique_operators_contacted }}</div><div class="kpi-label">Unique operators contacted</div></div>
+  <div class="kpi-card"><div class="kpi-value">{{ summary.opened }} / {{ summary.clicked }}</div><div class="kpi-label">Opened / clicked (signals)</div><div class="note">opens are estimates only</div></div>
+</div>
+<p class="note">Four different things are counted separately: <strong>accepted</strong> (the mail server took it), <strong>delivered</strong> (a provider confirmed it - needs delivery events), <strong>opened</strong> (an image was loaded - email apps can inflate or hide this) and <strong>clicked</strong> (a tracked link was opened).</p>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Campaigns</h2>
+  {% if not campaigns %}
+    <p class="note">No campaigns yet. <a href="{{ url_for('ui.email_campaign_new') }}">Create the first one</a> - it starts as a draft and nothing is sent until you launch it.</p>
+  {% else %}
+  <div class="table-wrap"><table><thead><tr><th>Campaign</th><th>Occasion</th><th>Audience</th><th>Status</th><th>Mode</th><th>Recipients</th><th>Accepted</th><th>Failed</th><th>Queued</th><th>Progress</th><th>Launched</th></tr></thead><tbody>
+  {% for c in campaigns %}
+    <tr>
+      <td><a href="{{ url_for('ui.email_campaign', cid=c.id) }}"><strong>{{ c.name }}</strong></a><div class="note">#{{ c.id }}{% if c.created_by %} &middot; {{ c.created_by }}{% endif %}</div></td>
+      <td>{{ c.occasion }}</td>
+      <td class="note">without {{ c.audience_match }} of: {{ device_list(c.devices, device_labels) }}</td>
+      <td>{{ campaign_badge(c.status) }}{% if c.status == 'scheduled' and c.scheduled_at %}<div class="note">{{ c.scheduled_at | ist }}</div>{% endif %}</td>
+      <td>{{ mode_badge(c.mode) }}</td>
+      <td>{{ c.recipients if c.status != 'draft' else '-' }}</td><td>{{ c.accepted }}</td><td>{{ c.failed }}</td><td>{{ c.queued }}</td>
+      <td>{% if c.status != 'draft' %}{{ c.percent }}%{% else %}-{% endif %}</td>
+      <td class="note">{% if c.launched_at %}{{ c.launched_at | ist }}<br>by {{ c.launched_by }}{% else %}-{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Email history</h2>
+  <form method="get" action="{{ url_for('ui.email_campaigns') }}">
+    <div class="filters">
+      <div><label for="q">Search (name, CSP code, email)</label><input id="q" name="q" value="{{ filters.q }}" placeholder="Search"></div>
+      <div><label for="occasion">Festival / occasion</label><select id="occasion" name="occasion"><option value="">All</option>{% for o in options.occasions %}<option value="{{ o }}" {{ 'selected' if filters.occasion == o }}>{{ o }}</option>{% endfor %}</select></div>
+      <div><label for="campaign_id">Campaign</label><select id="campaign_id" name="campaign_id"><option value="">All</option>{% for c in options.campaigns %}<option value="{{ c.id }}" {{ 'selected' if filters.campaign_id == c.id|string }}>{{ c.name }}</option>{% endfor %}</select></div>
+      <div><label for="device">Device not owned</label><select id="device" name="device"><option value="">Any</option>{% for k, v in device_labels.items() %}<option value="{{ k }}" {{ 'selected' if filters.device == k }}>{{ v }}</option>{% endfor %}</select></div>
+      <div><label for="status">Email status</label><select id="status" name="status"><option value="">All</option>{% for k, v in status_filters.items() %}<option value="{{ k }}" {{ 'selected' if filters.status == k }}>{{ v }}</option>{% endfor %}</select></div>
+      <div><label for="date_from">From date</label><input id="date_from" type="date" name="date_from" value="{{ filters.date_from }}"></div>
+      <div><label for="date_to">To date</label><input id="date_to" type="date" name="date_to" value="{{ filters.date_to }}"></div>
+      <div><label for="location">State / location</label><select id="location" name="location"><option value="">All</option>{% for l in options.locations %}<option value="{{ l }}" {{ 'selected' if filters.location == l }}>{{ l }}</option>{% endfor %}</select></div>
+      <div><label for="rm">Regional manager</label><input id="rm" name="rm" value="{{ filters.rm }}" placeholder="RM name"></div>
+      <div style="display:flex;gap:8px"><button class="btn btn-primary" type="submit">Apply</button><a class="btn btn-outline" href="{{ url_for('ui.email_campaigns') }}">Reset</a></div>
+    </div>
+  </form>
+  <p class="note">{{ messages.total }} message{{ '' if messages.total == 1 else 's' }}{% if filters.values() | select | list %} match the filters{% endif %}. Email addresses are masked here; open a message to see the full address.</p>
+  {% if not messages.rows %}
+    <p class="note">{% if summary.history_rows %}No messages match these filters. <a href="{{ url_for('ui.email_campaigns') }}">Reset the filters</a>.{% else %}No emails have been sent yet. Messages appear here once a campaign has been launched.{% endif %}</p>
+  {% else %}
+  <div class="table-wrap"><table><thead><tr><th>CSP code</th><th>Operator</th><th>Email</th><th>Location</th><th>RM</th><th>Device ownership</th><th>Occasion</th><th>Campaign</th><th>Subject</th><th>Sent</th><th>Status</th><th>Opened</th><th>Clicked</th><th>Failure reason</th><th>Updated</th></tr></thead><tbody>
+  {% for m in messages.rows %}
+    <tr>
+      <td><a href="{{ url_for('ui.email_message', rid=m.id) }}"><strong>{{ m.csp_code }}</strong></a></td>
+      <td>{{ m.name }}</td><td class="note">{{ m.email_masked }}</td><td>{{ m.location or '-' }}</td><td>{{ m.rm or '-' }}</td>
+      <td class="note">{{ m.ownership }}</td><td>{{ m.occasion }}</td>
+      <td><a href="{{ url_for('ui.email_campaign', cid=m.campaign_id) }}">{{ m.campaign_name }}</a></td>
+      <td class="note">{{ m.subject or '-' }}</td>
+      <td class="note">{{ (m.sent_at | ist) if m.sent_at else '-' }}</td>
+      <td>{{ message_badge(m.status, m.status_key, m.delivery_status) }}</td>
+      <td class="note">{{ m.opened }}</td><td class="note">{{ m.clicked }}</td>
+      <td class="note">{{ m.failure_reason or '' }}</td><td class="note">{{ m.updated_at | relative_time }}</td>
+    </tr>
+  {% endfor %}
+  </tbody></table></div>
+  <div class="pager">
+    {% if messages.page > 1 %}<a class="btn btn-outline btn-sm" href="{{ page_url(messages.page - 1) }}">&larr; Previous</a>{% endif %}
+    <span>Page {{ messages.page }} of {{ messages.pages }}</span>
+    {% if messages.page < messages.pages %}<a class="btn btn-outline btn-sm" href="{{ page_url(messages.page + 1) }}">Next &rarr;</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -11,6 +11,8 @@ from flask import Blueprint, jsonify, request
 from db import get_connection
 from device_state import derive_device_state
 import diagnosis
+import learning
+import updates
 from events import apply_device_transition, record_event
 from security import report_limiter, verify_api_key
 
@@ -178,9 +180,26 @@ def report():
             "UPDATE csps SET printer_verified=COALESCE(?, printer_verified), "
             "microatm_verified=COALESCE(?, microatm_verified) WHERE csp_id=?",
             (_verified(printer), _verified(microatm), csp_id))
+        # Update capability (agents with the updater). Absent on legacy agents -> columns stay NULL, shown as
+        # "needs one-time bootstrap". COALESCE: a report without the fields never wipes what is stored.
+        caps = body.get("capabilities") if isinstance(body.get("capabilities"), dict) else None
+        conn.execute(
+            "UPDATE csps SET update_capable=COALESCE(?, update_capable), updater_version=COALESCE(?, updater_version), "
+            "agent_sequence=COALESCE(?, agent_sequence) WHERE csp_id=?",
+            ((1 if caps.get("remote_update") is True else 0) if caps is not None else None,
+             _text(caps, "updater", 20) or None if caps is not None else None,
+             _int_or_none(body, "agent_sequence"), csp_id))
+        # The outcome of the last update, reported by the NEW agent version. Success needs this heartbeat's own
+        # agent_version to equal the release version (see updates.record_result).
+        updates.record_result(conn, csp_id, body.get("update_result"), agent_version)
+        updates.sweep_stale(conn)
         # Root-cause diagnosis (agent 2.0+). Devices covered by it get their events/
         # incidents from the issue history; older agents keep the shallow logic below.
         diag_handled = diagnosis.store(conn, csp_id, body, now)
+        try:                                   # outcome records (agent 2.3+): must never be able to fail a heartbeat
+            learning.store(conn, csp_id, body, now)
+        except Exception:                      # noqa: BLE001
+            log.exception("could not store outcome records from %s", csp_id)
         old_printer_state = derive_device_state(
             old["printer_configured"] if old else 0, old["printer_present"] if old else 0,
             old["printer_ok"] if old else 0, old["printer_status"] if old else "",
@@ -234,6 +253,10 @@ def report():
             event_type = "test_print_success" if _bool(functional, "ok") else "test_print_failure"
             record_event(conn, csp_id, event_type, _text(functional, "detail", 300))
 
+        assignment = updates.assignment_for_heartbeat(conn, csp_id)
         conn.commit()
     log.debug("accepted report from csp_id=%s", csp_id)
-    return jsonify({"ok": True, "received_at": now})
+    response = {"ok": True, "received_at": now}
+    if assignment:
+        response["update"] = assignment               # unknown field to legacy agents: ignored
+    return jsonify(response)

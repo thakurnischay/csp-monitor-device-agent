@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Agent Updates - CSP Device Monitor{% endblock %}
+{% block body %}
+<h1>Agent Updates</h1>
+<p class="note" style="margin-top:4px">Release a new agent version and roll it out to chosen CSPs. Updates are signed with your offline key, downloaded by each agent over HTTPS, verified, installed with automatic rollback, and only counted as <strong>Successful</strong> after the new version reports healthy.</p>
+
+{% if not keys_installed %}
+<div class="flash" style="border-color:var(--bad);background:var(--bad-bg)">No release-signing public key is installed on this server, so releases cannot be uploaded. Put your public key in <code>release_public_keys.json</code> (see UPDATES.md).</div>
+{% endif %}
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">1. Upload a signed release</h2>
+  <p class="note">Create it on your own machine with <code>release_tool.py build</code>; upload the three files it produces. The server re-verifies the signature and every file before accepting it.</p>
+  <form method="post" action="{{ url_for('ui.updates_upload') }}" enctype="multipart/form-data" class="inline" style="align-items:flex-end;gap:14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div><label>Package (.zip)<br><input type="file" name="package" accept=".zip" required></label></div>
+    <div><label>Manifest (.manifest.json)<br><input type="file" name="manifest" accept=".json" required></label></div>
+    <div><label>Signature (.manifest.sig)<br><input type="file" name="signature" accept=".sig,.txt" required></label></div>
+    <button class="btn btn-primary" type="submit">Upload and verify</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">2. Releases</h2>
+  {% if not releases %}<p class="note">No releases yet.</p>{% else %}
+  <table><thead><tr><th>Version</th><th>Seq.</th><th>Kind</th><th>Status</th><th>Uploaded</th><th>Deployments</th><th>Release notes</th><th></th></tr></thead><tbody>
+  {% for r in releases %}
+    <tr>
+      <td><strong>{{ r.version }}</strong></td><td>{{ r.sequence }}</td>
+      <td>{{ r.kind }}</td>
+      <td>{% if r.status == 'APPROVED' %}<span class="badge badge-green"><span class="dot"></span>Approved</span>
+          {% elif r.status == 'REVOKED' %}<span class="badge badge-red"><span class="dot"></span>Revoked</span>
+          {% else %}<span class="badge badge-amber"><span class="dot"></span>Uploaded - not approved</span>{% endif %}</td>
+      <td class="note">{{ r.uploaded_at | ist }}<br>by {{ r.uploaded_by }}</td>
+      <td class="note">{{ r.total }}{% if r.stats.get('successful') %} ({{ r.stats.get('successful') }} successful){% endif %}</td>
+      <td class="note" style="max-width:280px">{{ r.notes }}</td>
+      <td>
+        {% if r.status == 'UPLOADED' %}
+        <form method="post" action="{{ url_for('ui.updates_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="approve_release"><input type="hidden" name="release_id" value="{{ r.id }}">
+          <button class="btn btn-primary btn-sm" type="submit">Approve</button></form>
+        {% endif %}
+        {% if r.status != 'REVOKED' %}
+        <form method="post" action="{{ url_for('ui.updates_action') }}" style="margin-top:4px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="revoke_release"><input type="hidden" name="release_id" value="{{ r.id }}">
+          <button class="btn btn-outline btn-sm" type="submit">Revoke</button></form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody></table>
+  <p class="note">A rollback is itself a release: build it with <code>release_tool.py rollback</code> (it re-signs the old, known-good code with a <em>higher</em> sequence), upload it here, approve it, and deploy it like any other. Agents never accept a lower sequence, so a downgrade cannot be forced by anyone without your key.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">3. Start a rollout</h2>
+  {% if not approved %}<p class="note">Approve a release first.</p>{% else %}
+  <form id="rolloutform" method="post" action="{{ url_for('ui.updates_action') }}" class="inline" style="align-items:flex-end;gap:14px;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="create_rollout">
+    <div><label>Release<br><select name="release_id">{% for r in approved %}<option value="{{ r.id }}">{{ r.version }} ({{ r.kind }})</option>{% endfor %}</select></label></div>
+    <div><label>Who gets it<br><select name="mode">
+      <option value="selected">The CSPs ticked in the table below</option>
+      <option value="group">A group</option>
+      <option value="all">All compatible CSPs</option></select></label></div>
+    <div><label>Group<br><select name="group_id"><option value="">-</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }} ({{ g.members | length }})</option>{% endfor %}</select></label></div>
+    <div><label>Type<br><select name="kind"><option value="pilot">Pilot (a few CSPs first)</option><option value="full">Full</option></select></label></div>
+    <div><label>Note<br><input name="note" maxlength="200" placeholder="optional"></label></div>
+    <button class="btn btn-primary" type="submit">Create rollout</button>
+  </form>
+  <p class="note">CSPs receive the offer at their next heartbeat (about 5 minutes). Legacy agents are skipped - they need the one-time bootstrap first (UPDATES.md).</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">4. Rollouts</h2>
+  {% if not rollouts %}<p class="note">No rollouts yet.</p>{% else %}
+  <table><thead><tr><th>#</th><th>Release</th><th>Type</th><th>State</th><th>Progress</th><th>Created</th><th></th></tr></thead><tbody>
+  {% for ro in rollouts %}
+    <tr>
+      <td>{{ ro.id }}</td><td>{{ ro.version }}</td><td>{{ ro.kind }}</td>
+      <td>{% if ro.status == 'ACTIVE' %}<span class="badge badge-green"><span class="dot"></span>Active</span>{% elif ro.status == 'PAUSED' %}<span class="badge badge-amber"><span class="dot"></span>Paused</span>{% else %}<span class="badge badge-gray"><span class="dot"></span>Cancelled</span>{% endif %}</td>
+      <td class="note">{% for k, v in ro.stats.items() %}{{ labels.get(k, k) }}: {{ v }}{% if not loop.last %} &middot; {% endif %}{% endfor %}{% if not ro.stats %}-{% endif %}</td>
+      <td class="note">{{ ro.created_at | ist }}<br>by {{ ro.created_by }}</td>
+      <td>
+        {% if ro.status == 'ACTIVE' %}<form method="post" action="{{ url_for('ui.updates_action') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="pause_rollout"><input type="hidden" name="rollout_id" value="{{ ro.id }}"><button class="btn btn-outline btn-sm" type="submit">Pause</button></form>{% endif %}
+        {% if ro.status == 'PAUSED' %}<form method="post" action="{{ url_for('ui.updates_action') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="resume_rollout"><input type="hidden" name="rollout_id" value="{{ ro.id }}"><button class="btn btn-outline btn-sm" type="submit">Resume</button></form>{% endif %}
+        {% if ro.status != 'CANCELLED' %}<form method="post" action="{{ url_for('ui.updates_action') }}" class="inline" style="margin-top:4px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="cancel_rollout"><input type="hidden" name="rollout_id" value="{{ ro.id }}"><button class="btn btn-outline btn-sm" type="submit">Cancel pending</button></form>
+        <form method="post" action="{{ url_for('ui.updates_action') }}" class="inline" style="margin-top:4px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="expand_rollout"><input type="hidden" name="rollout_id" value="{{ ro.id }}">
+          <button class="btn btn-primary btn-sm" type="submit" {% if not ro.can_expand %}title="Enabled after the pilot has a verified success and no failures - or tick 'anyway'"{% endif %}>Expand to all compatible</button>
+          <label class="note"><input type="checkbox" name="force" value="1"> anyway</label></form>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody></table>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">5. Every CSP</h2>
+  <table><thead><tr><th></th><th>CSP</th><th>Code</th><th>Current version</th><th>Target</th><th>Update capability</th><th>Last heartbeat</th><th>Deployment</th><th>Installation status</th><th>Last attempt</th><th>Error</th><th></th></tr></thead><tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{% if r.capable %}<input type="checkbox" name="csp_ids" value="{{ r.csp_id }}" form="rolloutform" aria-label="select {{ r.csp_id }}">{% endif %}</td>
+      <td><a class="row" href="{{ url_for('ui.csp_detail', csp_id=r.csp_id) }}">{{ r.name }}</a></td>
+      <td>{{ r.csp_id }}</td><td>{{ r.version }}</td><td>{{ r.target or '-' }}</td>
+      <td class="note">{{ r.capability }}</td>
+      <td class="note" title="{{ r.last_seen | ist }}">{{ r.last_seen | relative_time }}</td>
+      <td>{% if r.status %}<span class="badge badge-{{ 'green' if r.raw_status == 'successful' else ('red' if r.raw_status in ('failed','rolled_back') else ('gray' if r.status in ('Offline','Cancelled') else 'amber')) }}"><span class="dot"></span>{{ r.status }}</span>{% else %}<span class="note">-</span>{% endif %}</td>
+      <td class="note">{{ r.detail or '-' }}</td>
+      <td class="note">{{ r.attempted | ist if r.attempted else '-' }}</td>
+      <td class="note" style="color:var(--bad-text)">{{ r.error or '' }}</td>
+      <td>
+        {% if r.raw_status in ('failed', 'rolled_back', 'cancelled') %}<form method="post" action="{{ url_for('ui.updates_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="retry_deployment"><input type="hidden" name="deployment_id" value="{{ r.deployment.id }}"><button class="btn btn-outline btn-sm" type="submit">Retry</button></form>
+        {% elif r.deployment and r.raw_status not in ('successful',) %}<form method="post" action="{{ url_for('ui.updates_action') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="cancel_deployment"><input type="hidden" name="deployment_id" value="{{ r.deployment.id }}"><button class="btn btn-outline btn-sm" type="submit">Cancel</button></form>{% endif %}
+      </td>
+    </tr>
+  {% else %}<tr><td colspan="12" class="note">No CSP has reported yet.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">6. CSP groups</h2>
+  <form method="post" action="{{ url_for('ui.updates_action') }}" class="inline" style="align-items:flex-end;gap:14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="create_group">
+    <div><label>Group name<br><input name="name" maxlength="60" required></label></div>
+    <div style="flex:1"><label>CSP codes (spaces or commas)<br><input name="members" style="width:100%" placeholder="1A850001 1A850002"></label></div>
+    <button class="btn btn-outline" type="submit">Create group</button>
+  </form>
+  {% for g in groups %}<p class="note"><strong>{{ g.name }}</strong>: {{ g.members | join(', ') or 'no members' }}
+    <form method="post" action="{{ url_for('ui.updates_action') }}" class="inline" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="delete_group"><input type="hidden" name="group_id" value="{{ g.id }}"><button class="btn btn-outline btn-sm" type="submit">Delete</button></form></p>{% endfor %}
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">7. Deployment history and audit</h2>
+  <table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>CSP</th><th>Detail</th></tr></thead><tbody>
+  {% for a in audit %}<tr><td class="note">{{ a.occurred_at | ist }}</td><td>{{ a.actor }}</td><td>{{ a.action }}</td><td>{{ a.target_csp or '-' }}</td><td class="note">{{ a.detail }}</td></tr>
+  {% else %}<tr><td colspan="5" class="note">Nothing yet.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}

@@ -1,0 +1,159 @@
+[
+  {
+    "id": "makar_sankranti_2026",
+    "occasion": "Makar Sankranti",
+    "startDate": "2026-01-09",
+    "endDate": "2026-01-17",
+    "dateConfirmed": true,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "republic_day_2026",
+    "occasion": "Republic Day",
+    "startDate": "2026-01-21",
+    "endDate": "2026-01-29",
+    "dateConfirmed": true,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "holi_2026",
+    "occasion": "Holi",
+    "startDate": "2026-02-27",
+    "endDate": "2026-03-07",
+    "dateConfirmed": false,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "eid_ul_fitr_2026",
+    "occasion": "Eid-ul-Fitr",
+    "startDate": "2026-03-16",
+    "endDate": "2026-03-24",
+    "dateConfirmed": false,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "baisakhi_2026",
+    "occasion": "Baisakhi",
+    "startDate": "2026-04-09",
+    "endDate": "2026-04-17",
+    "dateConfirmed": true,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "akshaya_tritiya_2026",
+    "occasion": "Akshaya Tritiya",
+    "startDate": "2026-04-18",
+    "endDate": "2026-04-23",
+    "dateConfirmed": false,
+    "windowNote": "Shrunk from the standard 5-before/3-after (would have started 2026-04-15) to avoid overlapping Baisakhi's window, which ends 2026-04-17 - the two festivals are only 6 days apart this year.",
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "eid_ul_adha_2026",
+    "occasion": "Eid-ul-Adha",
+    "startDate": "2026-05-22",
+    "endDate": "2026-05-30",
+    "dateConfirmed": false,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "independence_day_2026",
+    "occasion": "Independence Day",
+    "startDate": "2026-08-10",
+    "endDate": "2026-08-18",
+    "dateConfirmed": true,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "rakhi_2026",
+    "occasion": "Rakshabandhan",
+    "startDate": "2026-08-27",
+    "endDate": "2026-08-31",
+    "dateConfirmed": true,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "ganesh_chaturthi_2026",
+    "occasion": "Ganesh Chaturthi",
+    "startDate": "2026-09-09",
+    "endDate": "2026-09-17",
+    "dateConfirmed": false,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "navratri_dussehra_2026",
+    "occasion": "Navratri-Dussehra",
+    "startDate": "2026-10-15",
+    "endDate": "2026-10-23",
+    "dateConfirmed": false,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "dhanteras_diwali_2026",
+    "occasion": "Dhanteras-Diwali",
+    "startDate": "2026-11-04",
+    "endDate": "2026-11-12",
+    "dateConfirmed": false,
+    "windowNote": "Dhanteras and Diwali merged into one occasion - only 2 days apart, so treating them as separate offers would mean two near-identical 'buy now' messages days apart. Window centred on Diwali (peak day).",
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "chhath_puja_2026",
+    "occasion": "Chhath Puja",
+    "startDate": "2026-11-13",
+    "endDate": "2026-11-19",
+    "dateConfirmed": false,
+    "windowNote": "Shrunk from the standard 5-before/3-after (would have started 2026-11-11) to avoid overlapping the Dhanteras-Diwali window, which ends 2026-11-12.",
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  },
+  {
+    "id": "christmas_new_year_2026",
+    "occasion": "Christmas-New Year",
+    "startDate": "2026-12-24",
+    "endDate": "2027-01-01",
+    "dateConfirmed": true,
+    "referencePrice": {
+      "MATM": 10000,
+      "PRINTER": 42000
+    }
+  }
+]

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Operators & opt-outs - Email Campaigns{% endblock %}
+{% block body %}
+<p class="note"><a href="{{ url_for('ui.email_campaigns') }}" style="color:var(--accent)">&larr; Email Campaigns</a></p>
+<h1>Operators &amp; opt-outs</h1>
+<p class="note" style="margin-top:4px">Who can be emailed comes from the CSP Growth Platform's operator file (the sheet's ownership claims and its human reconciliations). The monitoring agents add a second opinion. Nothing here is ever written back to the CSP Growth Platform, and importing never touches campaign history.</p>
+
+<div class="panel stack">
+  <h2 style="font-size:1.05rem">Import operator data</h2>
+  <form method="post" action="{{ url_for('ui.email_operators_import') }}" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div><label for="csps_file">csps.json from the CSP Growth Platform (<code>backend/data/csps.json</code>)</label><br><input id="csps_file" type="file" name="csps_file" accept=".json,application/json" required></div>
+    <div><label for="state_file">Optional: its <code>state.json</code> (carries the human ownership decisions)</label><br><input id="state_file" type="file" name="state_file" accept=".json,application/json"></div>
+    <button class="btn btn-primary" type="submit">Import</button>
+    <p class="note">Operators are matched by <strong>CSP code</strong>. An operator missing from a newer file is kept (never emailed) so nothing already sent loses its context. The file contains contact details: keep it off shared drives.</p>
+  </form>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi-card"><div class="kpi-value">{{ present }}</div><div class="kpi-label">Operators in the latest import</div><div class="note">{{ total }} ever imported</div></div>
+  <div class="kpi-card"><div class="kpi-value">{{ matched }} / {{ agents }}</div><div class="kpi-label">Monitored CSPs found in the operator data</div><div class="note">the rest have no operator record yet</div></div>
+  <div class="kpi-card"><div class="kpi-value">{{ recon }}</div><div class="kpi-label">Human ownership decisions</div></div>
+  <div class="kpi-card"><div class="kpi-value">{{ n_suppressed }}</div><div class="kpi-label">Addresses opted out / bounced</div></div>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Device ownership of the {{ present }} operators</h2>
+  <div class="table-wrap"><table><thead><tr><th>Device</th><th>Owned</th><th>Confirmed missing</th><th>Disputed (review)</th><th>Unknown (review)</th></tr></thead><tbody>
+  {% for d, label in device_labels.items() %}<tr><td><strong>{{ label }}</strong></td>
+    <td>{{ summary[d]['OWNED'] }}</td><td>{{ summary[d]['GAP_VERIFIED'] }}</td><td>{{ summary[d]['GAP_DISPUTED'] }}</td><td>{{ summary[d]['UNKNOWN'] }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="note"><strong>Only "confirmed missing" counts as not owning a device.</strong> Micro-ATM and printer follow the CSP Growth Platform's own rules. GPS comes from the sheet's GPS column (a claim only). The sheet has no fingerprint-scanner column, so that stays unknown unless the monitoring agent or a person says otherwise. A device the monitoring agent has configured overrides a "no" in the sheet (it becomes "disputed").</p>
+</div>
+
+<div class="two-col">
+  <div class="panel stack">
+    <h2 style="font-size:1.05rem">Record a human decision</h2>
+    <p class="note">For example after phoning an operator. This overrides the sheet and the monitoring agent for that device.</p>
+    <form method="post" action="{{ url_for('ui.email_operators_reconcile') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div><label for="rc_code">CSP code</label> <input id="rc_code" name="csp_code" required></div>
+      <div><label for="rc_dev">Device</label> <select id="rc_dev" name="device">{% for d, label in device_labels.items() %}<option value="{{ d }}">{{ label }}</option>{% endfor %}</select>
+        <select name="owns" aria-label="Has it?"><option value="">Has it?</option><option value="yes">Has the device</option><option value="no">Does not have it</option></select></div>
+      <div><label for="rc_note">Note</label> <input id="rc_note" name="note" maxlength="200" style="width:80%"></div>
+      <button class="btn btn-outline" type="submit">Save decision</button>
+    </form>
+  </div>
+  <div class="panel stack">
+    <h2 style="font-size:1.05rem">Opt-outs</h2>
+    <form method="post" action="{{ url_for('ui.email_suppress') }}" style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input name="email" type="email" placeholder="address to never email" required> <button class="btn btn-outline btn-sm" type="submit">Add to opt-out list</button>
+    </form>
+    {% if not suppressions %}<p class="note">Nobody has opted out yet.</p>{% else %}
+    <div class="table-wrap"><table><thead><tr><th>Address</th><th>CSP</th><th>Why</th><th>When</th><th></th></tr></thead><tbody>
+    {% for s in suppressions %}<tr><td>{{ mask(s.email) }}</td><td>{{ s.csp_code or '-' }}</td><td>{{ s.reason }}</td><td class="note">{{ s.created_at | ist }}</td>
+      <td><form method="post" action="{{ url_for('ui.email_suppress') }}" data-confirm="Remove this address from the opt-out list? It could be emailed again."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="suppression_id" value="{{ s.rid }}"><button class="btn btn-outline btn-sm" type="submit">Remove</button></form></td></tr>{% endfor %}
+    </tbody></table></div>{% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Import history</h2>
+  {% if not imports %}<p class="note">No import yet.</p>{% else %}
+  <div class="table-wrap"><table><thead><tr><th>When</th><th>By</th><th>File</th><th>Source file produced</th><th>Rows</th><th>Accepted</th><th>Skipped</th></tr></thead><tbody>
+  {% for i in imports %}<tr><td class="note">{{ i.imported_at | ist }}</td><td>{{ i.imported_by }}</td><td>{{ i.source_name }}</td><td class="note">{{ (i.source_stamp | ist) if i.source_stamp else '-' }}</td><td>{{ i.rows_total }}</td><td>{{ i.rows_accepted }}</td><td>{{ i.rows_skipped }}</td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+</div>
+{% endblock %}

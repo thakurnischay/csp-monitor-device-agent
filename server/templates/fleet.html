@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Fleet - CSP Device Monitor{% endblock %}
+{% block crumb %}Fleet Overview{% endblock %}
 {% block body %}
 {% macro diag_badge(c, dev) %}
   {% set dg = c[dev ~ '_diag'] %}
@@ -12,199 +13,261 @@
   {% set ok = c[dev ~ '_ok'] %}
   {% if c[dev ~ '_diag'] and not c.devices_unknown %}{{ diag_badge(c, dev) }}
   {% elif not c.new_devices_reported %}<span class="note" title="This CSP's agent is an older version that doesn't report this device yet - update the agent">&ndash;</span>
-  {% elif c.devices_unknown and configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
+  {% elif c.devices_unknown and configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="sub">CSP offline</div>
   {% elif not configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
   {% elif c[dev ~ '_state'] == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
   {% elif ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
   {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
 {% endmacro %}
+{% macro ico(name, size=18) -%}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'total' %}<path d="M3 21V8l9-5 9 5v13"/><path d="M9 21v-6h6v6"/>
+{%- elif name == 'online' %}<path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/>
+{%- elif name == 'stale' %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
+{%- elif name == 'offline' %}<path d="M2 2l20 20"/><path d="M8.5 8.5A7 7 0 0 0 5 14.5"/><path d="M12 19h.01"/><path d="M15.5 15.5a7 7 0 0 0 .5-8"/>
+{%- elif name == 'printer' %}<rect x="4" y="9" width="16" height="7" rx="1"/><path d="M6 9V5h12v4M8 16v3h8v-3"/>
+{%- elif name == 'microatm' %}<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/><path d="M7 15h4"/>
+{%- elif name == 'biometric' %}<path d="M12 11v4"/><path d="M8 14v-3a4 4 0 0 1 8 0v3"/><path d="M5 14v-3a7 7 0 0 1 14 0v3"/>
+{%- elif name == 'gps' %}<path d="M12 21s-7-5.2-7-11a7 7 0 0 1 14 0c0 5.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>
+{%- elif name == 'unverified' %}<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/>
+{%- elif name == 'urgent' %}<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4"/><path d="M12 17h.01"/>
+{%- elif name == 'refresh' %}<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/>
+{%- elif name == 'download' %}<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/>
+{%- elif name == 'search' %}<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+{%- elif name == 'go' %}<path d="M9 6l6 6-6 6"/>
+{%- elif name == 'check' %}<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/>
+{%- elif name == 'info' %}<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>
+{%- endif %}</svg>
+{%- endmacro %}
+{% macro pct(n) %}{{ ((n * 100 / total) | round | int) if total else 0 }}%{% endmacro %}
+{% set page_size = page_size if page_size is defined else ((matched / total_pages) | round(0, 'ceil') | int if total_pages else 1) %}
 {% if refresh != '0' %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
-<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+
+<div class="page-head">
   <div>
-    <h1>Fleet</h1>
-    <p class="note" style="margin:4px 0 0">Updated {{ updated_at | relative_time }} &middot; {{ updated_at | ist }}</p>
+    <h1>Fleet Overview</h1>
+    <p class="sub">Monitor CSP devices, connectivity, and operational issues from one place.</p>
   </div>
-  <div style="display:flex;align-items:center;gap:8px">
-    <span class="note">Auto-refresh</span>
-    {% if refresh != '0' %}<span class="live-dot"></span>{% endif %}
-    <div class="segmented">
-      <a href="{{ qs(refresh=None) }}" class="{{ 'active' if refresh == '0' }}">Off</a>
-      <a href="{{ qs(refresh='30') }}" class="{{ 'active' if refresh == '30' }}">30s</a>
-      <a href="{{ qs(refresh='60') }}" class="{{ 'active' if refresh == '60' }}">60s</a>
+  <div class="page-actions">
+    <span class="meta-line" title="{{ updated_at | ist }}">{% if refresh != '0' %}<span class="live-dot" aria-hidden="true"></span>{% endif %}Updated {{ updated_at | relative_time }}</span>
+    <div class="segmented" role="group" aria-label="Auto-refresh">
+      <a href="{{ qs(refresh=None) }}" class="{{ 'active' if refresh == '0' }}" {% if refresh == '0' %}aria-current="true"{% endif %}>Off</a>
+      <a href="{{ qs(refresh='30') }}" class="{{ 'active' if refresh == '30' }}" {% if refresh == '30' %}aria-current="true"{% endif %}>30s</a>
+      <a href="{{ qs(refresh='60') }}" class="{{ 'active' if refresh == '60' }}" {% if refresh == '60' %}aria-current="true"{% endif %}>60s</a>
     </div>
+    <button type="button" class="btn btn-outline" data-refresh>{{ ico('refresh', 15) }}Refresh</button>
   </div>
 </div>
-<p class="note" style="margin-top:10px">Online = reported within the last {{ window }} minutes; Stale = reported within the last hour but not recently; Offline = longer than that, or never. Device cells show a <strong>root-cause diagnosis</strong> (agent 2.0+): <em>Software issue</em>, <em>Driver issue</em>, <em>Suspected hardware failure</em> and <em>Service unavailable</em> are diagnosed faults; <em>Degraded</em> works with a limitation (for example low paper); <em>Diagnosis required</em> means the evidence is not enough yet. The coloured tag (Critical / High / Medium / Low) is the business severity; open a CSP for the evidence, affected workflows and recommended steps. <strong>Unverified</strong> (amber) = the device is plugged in, but the agent could not confirm it is the right device, because a generic entry such as "USB Input Device" was picked - it is not shown as OK until the CSP uses <em>Find my device</em> on the agent page. <strong>Disconnected</strong> under a device means the CSP's PC is offline, so the device's current status can't be checked (last known status is shown on hover). A dash (&ndash;) means that CSP's agent is an older version that doesn't report that device yet.</p>
 
+<div class="section-head" style="margin-top:0">
+  <h2>Connectivity</h2>
+  <span class="hint">Online = reported in the last {{ window }} min &middot; Stale = within the hour &middot; Offline = longer, or never</span>
+</div>
 <div class="kpi-grid">
-  <div class="kpi-card">
-    <div class="kpi-top">
-      <div class="kpi-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21v-6h6v6"/></svg></div>
-    </div>
+  <a class="kpi-card tone-brand" href="{{ url_for('ui.fleet') }}">
+    <div class="kpi-top"><div class="kpi-icon brand">{{ ico('total') }}</div>{% if never_reported %}<span class="kpi-pct" title="Registered but never reported">{{ never_reported }} never reported</span>{% endif %}</div>
     <div class="kpi-value">{{ total }}</div>
     <div class="kpi-label">Total CSPs</div>
-  </div>
-  <div class="kpi-card tint-ok">
-    <div class="kpi-top">
-      <div class="kpi-icon ok"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.5a11 11 0 0 1 14 0"/><path d="M8.5 16a6 6 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/></svg></div>
-      <span class="kpi-dot ok"></span>
-    </div>
+  </a>
+  <a class="kpi-card tone-ok" href="{{ qs(status='ONLINE', page=1) }}">
+    <div class="kpi-top"><div class="kpi-icon ok">{{ ico('online') }}</div><span class="kpi-pct">{{ pct(online) }}</span></div>
     <div class="kpi-value">{{ online }}</div>
     <div class="kpi-label">Online</div>
-  </div>
-  <div class="kpi-card tint-amber">
-    <div class="kpi-top">
-      <div class="kpi-icon amber"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
-      <span class="kpi-dot amber"></span>
-    </div>
+  </a>
+  <a class="kpi-card tone-amber" href="{{ qs(status='STALE', page=1) }}">
+    <div class="kpi-top"><div class="kpi-icon amber">{{ ico('stale') }}</div><span class="kpi-pct">{{ pct(stale) }}</span></div>
     <div class="kpi-value">{{ stale }}</div>
     <div class="kpi-label">Stale</div>
-  </div>
-  <div class="kpi-card tint-bad">
-    <div class="kpi-top">
-      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20"/><path d="M8.5 8.5A7 7 0 0 0 5 14.5"/><path d="M12 19h.01"/><path d="M15.5 15.5a7 7 0 0 0 .5-8"/></svg></div>
-      <span class="kpi-dot bad"></span>
-    </div>
+  </a>
+  <a class="kpi-card tone-bad" href="{{ qs(status='OFFLINE', page=1) }}">
+    <div class="kpi-top"><div class="kpi-icon bad">{{ ico('offline') }}</div><span class="kpi-pct">{{ pct(offline) }}</span></div>
     <div class="kpi-value">{{ offline }}</div>
     <div class="kpi-label">Offline</div>
-  </div>
-  <div class="kpi-card tint-bad">
-    <div class="kpi-top">
-      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="9" width="16" height="7" rx="1"/><path d="M6 9V5h12v4M8 16v3h8v-3"/></svg></div>
-      <span class="kpi-dot bad"></span>
-    </div>
-    <div class="kpi-value">{{ printer_problems }}</div>
-    <div class="kpi-label">Printer problems</div>
-  </div>
-  <div class="kpi-card tint-bad">
-    <div class="kpi-top">
-      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/><path d="M7 15h4"/></svg></div>
-      <span class="kpi-dot bad"></span>
-    </div>
-    <div class="kpi-value">{{ microatm_problems }}</div>
-    <div class="kpi-label">Micro-ATM problems</div>
-  </div>
-  <div class="kpi-card tint-bad">
-    <div class="kpi-top">
-      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 11v4"/><path d="M8 14v-3a4 4 0 0 1 8 0v3"/><path d="M5 14v-3a7 7 0 0 1 14 0v3"/></svg></div>
-      <span class="kpi-dot bad"></span>
-    </div>
-    <div class="kpi-value">{{ biometric_problems }}</div>
-    <div class="kpi-label">Biometric problems</div>
-  </div>
-  <div class="kpi-card tint-bad">
-    <div class="kpi-top">
-      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-5.2-7-11a7 7 0 0 1 14 0c0 5.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>
-      <span class="kpi-dot bad"></span>
-    </div>
-    <div class="kpi-value">{{ gps_problems }}</div>
-    <div class="kpi-label">GPS problems</div>
-  </div>
-  <div class="kpi-card tint-amber">
-    <div class="kpi-top">
-      <div class="kpi-icon amber"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><circle cx="12" cy="16.5" r="0.6"/></svg></div>
-      <span class="kpi-dot amber"></span>
-    </div>
-    <div class="kpi-value">{{ unverified_devices }}</div>
-    <div class="kpi-label">Unverified devices</div>
-  </div>
-  <div class="kpi-card tint-bad">
-    <div class="kpi-top">
-      <div class="kpi-icon bad"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6"/></svg></div>
-      <span class="kpi-dot bad"></span>
-    </div>
-    <div class="kpi-value">{{ urgent_issues }}</div>
-    <div class="kpi-label">Critical / high issues</div>
-  </div>
-</div>
-
-<form method="get" class="toolbar">
-  <div class="search-wrap">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-    <input name="q" value="{{ q }}" placeholder="Search by name or code&hellip;">
-  </div>
-  <select name="status">
-    <option value="" {{ 'selected' if not status_filter }}>All statuses</option>
-    <option value="ONLINE" {{ 'selected' if status_filter == 'ONLINE' }}>Online</option>
-    <option value="STALE" {{ 'selected' if status_filter == 'STALE' }}>Stale</option>
-    <option value="OFFLINE" {{ 'selected' if status_filter == 'OFFLINE' }}>Offline</option>
-    <option value="NEVER_REPORTED" {{ 'selected' if status_filter == 'NEVER_REPORTED' }}>Never reported</option>
-  </select>
-  <div class="segmented">
-    <a href="{{ qs(status='ONLINE', page=1) }}" class="{{ 'active' if status_filter == 'ONLINE' }}">Online</a>
-    <a href="{{ qs(status='STALE', page=1) }}" class="{{ 'active' if status_filter == 'STALE' }}">Stale</a>
-    <a href="{{ qs(status='OFFLINE', page=1) }}" class="{{ 'active' if status_filter == 'OFFLINE' }}">Offline</a>
-  </div>
-  <label class="toggle-label">
-    <span class="switch">
-      <input type="checkbox" name="problems_only" value="1" {{ 'checked' if problems_only }} class="auto-submit">
-      <span class="track"></span>
-    </span>
-    Problems only
-  </label>
-  <button type="submit" class="btn btn-outline">Filter</button>
-  {% if q or status_filter or problems_only %}<a href="{{ url_for('ui.fleet') }}" class="note">Clear</a>{% endif %}
-  <a href="{{ csv_url }}" class="btn btn-outline" style="margin-left:auto">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-    Export CSV{% if matched != total %} ({{ matched }}){% endif %}
   </a>
-</form>
-
-<table>
-  <thead><tr>
-    <th>CSP ID</th>
-    <th><a href="{{ sort_urls.name }}">Name{% if sort == 'name' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
-    <th><a href="{{ sort_urls.status }}">Status{% if sort == 'status' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
-    <th><a href="{{ sort_urls.last_seen }}">Last report{% if sort == 'last_seen' %} {{ '▲' if direction == 'asc' else '▼' }}{% endif %}</a></th>
-    <th>Printer status</th><th>Micro-ATM status</th><th>Biometric status</th><th>GPS status</th>
-  </tr></thead>
-  <tbody>
-  {% for c in csps %}
-    <tr>
-      <td>{{ c.csp_id }}</td>
-      <td><a class="row" href="{{ url_for('ui.csp_detail', csp_id=c.csp_id) }}">{{ c.name or '-' }}</a></td>
-      <td>
-        {% if c.state == 'ONLINE' %}<span class="badge badge-green"><span class="dot"></span>Online</span>
-        {% elif c.state == 'STALE' %}<span class="badge badge-amber"><span class="dot"></span>Stale</span>
-        {% elif c.state == 'NEVER_REPORTED' %}<span class="badge badge-gray"><span class="dot"></span>Never reported</span>
-        {% else %}<span class="badge badge-red"><span class="dot"></span>Offline</span>{% endif %}
-      </td>
-      <td title="{{ c.last_seen | ist }}" class="note">{{ c.last_seen | relative_time }}</td>
-      <td>
-        {% if c.printer_diag and not c.devices_unknown %}{{ diag_badge(c, 'printer') }}
-        {% elif c.devices_unknown and c.printer_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.printer_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
-        {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
-        {% elif c.printer_state == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
-        {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
-        {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
-        {% if c.printer_test_ran and not c.devices_unknown %}<div class="note" style="font-size:0.76rem;margin-top:3px">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
-      </td>
-      <td>
-        {% if c.microatm_diag and not c.devices_unknown %}{{ diag_badge(c, 'microatm') }}
-        {% elif c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.microatm_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="note" style="font-size:0.76rem;margin-top:3px">CSP offline</div>
-        {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
-        {% elif c.microatm_state == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
-        {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
-        {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
-      </td>
-      <td>{{ device_cell(c, 'biometric') }}</td>
-      <td>{{ device_cell(c, 'gps') }}</td>
-    </tr>
-  {% else %}
-    <tr><td colspan="8" class="note">
-      {% if problems_only %}No open problems right now.
-      {% elif q or status_filter %}No CSP matches this filter.
-      {% else %}No CSP has reported yet.{% endif %}
-    </td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-
-{% if total_pages > 1 %}
-<div class="note" style="margin-top:12px;display:flex;gap:14px;align-items:center">
-  <span>Page {{ page }} of {{ total_pages }} ({{ matched }} matching)</span>
-  {% if page > 1 %}<a href="{{ qs(page=page-1) }}">&larr; Previous</a>{% endif %}
-  {% if page < total_pages %}<a href="{{ qs(page=page+1) }}">Next &rarr;</a>{% endif %}
 </div>
-{% endif %}
+
+<div class="section-head">
+  <h2>Device Health &amp; Operational Issues</h2>
+  <span class="hint">Live problems on CSPs that are not offline</span>
+</div>
+{% set dev_cards = [
+  ('printer', 'Printer problems', printer_problems, 'bad'),
+  ('microatm', 'Micro-ATM problems', microatm_problems, 'bad'),
+  ('biometric', 'Biometric problems', biometric_problems, 'bad'),
+  ('gps', 'GPS problems', gps_problems, 'bad'),
+  ('unverified', 'Unverified devices', unverified_devices, 'amber'),
+  ('urgent', 'Critical / high issues', urgent_issues, 'bad'),
+] %}
+<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+  {% for key, label, n, tone in dev_cards %}
+  <a class="kpi-card {{ ('tone-' ~ tone) if n else 'tone-zero' }}" href="{{ qs(problems_only='1', status=None, page=1) }}" title="Show CSPs with open problems">
+    <div class="kpi-top"><div class="kpi-icon {{ tone if n else 'quiet' }}">{{ ico(key) }}</div>{% if not n %}<span class="kpi-pct">clear</span>{% endif %}</div>
+    <div class="kpi-value">{{ n }}</div>
+    <div class="kpi-label">{{ label }}</div>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="grid-2" style="margin-top:16px">
+  <section class="card" aria-labelledby="dist-h">
+    <h2 id="dist-h">Connectivity distribution</h2>
+    {% if total %}
+    <div class="dist-bar" role="img" aria-label="{{ online }} online, {{ stale }} stale, {{ offline }} offline, {{ never_reported }} never reported, out of {{ total }}">
+      {% if online %}<span class="s-ok" style="width:{{ online * 100 / total }}%" title="Online: {{ online }}"></span>{% endif %}
+      {% if stale %}<span class="s-amber" style="width:{{ stale * 100 / total }}%" title="Stale: {{ stale }}"></span>{% endif %}
+      {% if offline %}<span class="s-bad" style="width:{{ offline * 100 / total }}%" title="Offline: {{ offline }}"></span>{% endif %}
+      {% if never_reported %}<span class="s-gray" style="width:{{ never_reported * 100 / total }}%" title="Never reported: {{ never_reported }}"></span>{% endif %}
+    </div>
+    <div class="dist-legend">
+      <a href="{{ qs(status='ONLINE', page=1) }}"><span class="dot ok"></span>Online <b>{{ online }}</b></a>
+      <a href="{{ qs(status='STALE', page=1) }}"><span class="dot amber"></span>Stale <b>{{ stale }}</b></a>
+      <a href="{{ qs(status='OFFLINE', page=1) }}"><span class="dot bad"></span>Offline <b>{{ offline }}</b></a>
+      <a href="{{ qs(status='NEVER_REPORTED', page=1) }}"><span class="dot gray"></span>Never reported <b>{{ never_reported }}</b></a>
+    </div>
+    {% else %}
+    <p class="note" style="margin:0">No CSP is registered yet. Approve an enrollment or issue an API key to start monitoring.</p>
+    {% endif %}
+    <details class="help">
+      <summary>{{ ico('info', 14) }}How statuses are decided</summary>
+      <div class="help-body">
+        <p><strong>Online</strong> = reported within the last {{ window }} minutes; <strong>Stale</strong> = reported within the last hour but not recently; <strong>Offline</strong> = longer than that, or never.</p>
+        <p>Device cells show a <strong>root-cause diagnosis</strong> (agent 2.0+): <em>Software issue</em>, <em>Driver issue</em>, <em>Suspected hardware failure</em> and <em>Service unavailable</em> are diagnosed faults; <em>Degraded</em> works with a limitation (for example low paper); <em>Diagnosis required</em> means the evidence is not enough yet. The coloured tag (Critical / High / Medium / Low) is the business severity; open a CSP for the evidence, affected workflows and recommended steps.</p>
+        <p><strong>Unverified</strong> (amber) = the device is plugged in, but the agent could not confirm it is the right device (a generic entry such as "USB Input Device" was picked) - it is not shown as OK until the CSP uses <em>Find my device</em> on the agent page. <strong>Disconnected</strong> under a device means the CSP's PC is offline, so the device's current status can't be checked. A dash (&ndash;) means that CSP's agent is too old to report that device.</p>
+      </div>
+    </details>
+  </section>
+
+  <section class="card" aria-labelledby="att-h">
+    <h2 id="att-h">Needs attention</h2>
+    {% set att = [
+      ('urgent', 'Critical / high severity issues', 'Across all devices', urgent_issues, 'has'),
+      ('printer', 'Passbook printer', 'CSPs with a live problem', printer_problems, 'has'),
+      ('microatm', 'Micro-ATM', 'CSPs with a live problem', microatm_problems, 'has'),
+      ('biometric', 'Fingerprint scanner', 'CSPs with a live problem', biometric_problems, 'has'),
+      ('gps', 'GPS dongle', 'CSPs with a live problem', gps_problems, 'has'),
+      ('unverified', 'Unverified devices', 'Plugged in, identity not confirmed', unverified_devices, 'warn'),
+    ] | sort(attribute=3, reverse=True) %}
+    {% if att | selectattr(3) | list %}
+    <div class="issue-rows">
+      {% for key, name, hint, n, cls in att if n %}
+      <a class="issue-row {{ cls }}" href="{{ qs(problems_only='1', status=None, page=1) }}">
+        <span class="ico">{{ ico(key) }}</span>
+        <span class="name">{{ name }}<small>{{ hint }}</small></span>
+        <span class="mini-bar" title="{{ n }} of {{ total }} CSPs"><span style="width:{{ (n * 100 / total) if total else 0 }}%"></span></span>
+        <span class="num">{{ n }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <p class="note" style="margin:10px 0 0">Click a row to list the affected CSPs; open a CSP for the evidence and recommended steps.</p>
+    {% else %}
+    <div class="all-clear">{{ ico('check', 18) }}No open device problems on CSPs that are reporting.</div>
+    {% endif %}
+  </section>
+</div>
+
+<div class="section-head">
+  <h2>CSPs</h2>
+  <span class="hint">{{ matched }} of {{ total }} shown{% if problems_only %} &middot; problems only{% endif %}</span>
+</div>
+<div class="table-card">
+  <form method="get" class="toolbar" role="search">
+    <div class="search-wrap">
+      {{ ico('search', 15) }}
+      <label for="fleet-q" class="sr-only">Search CSPs</label>
+      <input id="fleet-q" name="q" value="{{ q }}" placeholder="Search by name or code&hellip;">
+    </div>
+    <label for="fleet-status" class="sr-only">Status</label>
+    <select id="fleet-status" name="status" class="auto-submit">
+      <option value="" {{ 'selected' if not status_filter }}>All statuses</option>
+      <option value="ONLINE" {{ 'selected' if status_filter == 'ONLINE' }}>Online</option>
+      <option value="STALE" {{ 'selected' if status_filter == 'STALE' }}>Stale</option>
+      <option value="OFFLINE" {{ 'selected' if status_filter == 'OFFLINE' }}>Offline</option>
+      <option value="NEVER_REPORTED" {{ 'selected' if status_filter == 'NEVER_REPORTED' }}>Never reported</option>
+    </select>
+    <label class="toggle-label">
+      <span class="switch">
+        <input type="checkbox" name="problems_only" value="1" {{ 'checked' if problems_only }} class="auto-submit">
+        <span class="track"></span>
+      </span>
+      Problems only
+    </label>
+    {% if sort %}<input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ direction }}">{% endif %}
+    {% if refresh != '0' %}<input type="hidden" name="refresh" value="{{ refresh }}">{% endif %}
+    <button type="submit" class="btn btn-primary">Filter</button>
+    {% if q or status_filter or problems_only %}<a href="{{ url_for('ui.fleet') }}" class="btn btn-ghost">Clear</a>{% endif %}
+    <a href="{{ csv_url }}" class="btn btn-outline" style="margin-left:auto">
+      {{ ico('download', 14) }}
+      Export CSV{% if matched != total %} ({{ matched }}){% endif %}
+    </a>
+  </form>
+
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr>
+      <th>CSP ID</th>
+      <th><a href="{{ sort_urls.name }}">Name{% if sort == 'name' %} <span class="sort">{{ '▲' if direction == 'asc' else '▼' }}</span>{% endif %}</a></th>
+      <th><a href="{{ sort_urls.status }}">Status{% if sort == 'status' %} <span class="sort">{{ '▲' if direction == 'asc' else '▼' }}</span>{% endif %}</a></th>
+      <th><a href="{{ sort_urls.last_seen }}">Last report{% if sort == 'last_seen' %} <span class="sort">{{ '▲' if direction == 'asc' else '▼' }}</span>{% endif %}</a></th>
+      <th>Printer status</th><th>Micro-ATM status</th><th>Biometric status</th><th>GPS status</th>
+      <th><span class="sr-only">Open</span></th>
+    </tr></thead>
+    <tbody>
+    {% for c in csps %}
+      <tr data-href="{{ url_for('ui.csp_detail', csp_id=c.csp_id) }}">
+        <td class="mono">{{ c.csp_id }}</td>
+        <td><a class="row" href="{{ url_for('ui.csp_detail', csp_id=c.csp_id) }}">{{ c.name or '-' }}</a></td>
+        <td>
+          {% if c.state == 'ONLINE' %}<span class="badge badge-green"><span class="dot"></span>Online</span>
+          {% elif c.state == 'STALE' %}<span class="badge badge-amber"><span class="dot"></span>Stale</span>
+          {% elif c.state == 'NEVER_REPORTED' %}<span class="badge badge-gray"><span class="dot"></span>Never reported</span>
+          {% else %}<span class="badge badge-red"><span class="dot"></span>Offline</span>{% endif %}
+        </td>
+        <td title="{{ c.last_seen | ist }}" class="note" style="white-space:nowrap">{{ c.last_seen | relative_time }}</td>
+        <td>
+          {% if c.printer_diag and not c.devices_unknown %}{{ diag_badge(c, 'printer') }}
+          {% elif c.devices_unknown and c.printer_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.printer_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="sub">CSP offline</div>
+          {% elif not c.printer_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
+          {% elif c.printer_state == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
+          {% elif c.printer_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
+          {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
+          {% if c.printer_test_ran and not c.devices_unknown %}<div class="sub">Test print: {% if c.printer_test_ok %}ok{% else %}problem{% endif %}</div>{% endif %}
+        </td>
+        <td>
+          {% if c.microatm_diag and not c.devices_unknown %}{{ diag_badge(c, 'microatm') }}
+          {% elif c.devices_unknown and c.microatm_configured %}<span class="badge badge-gray" title="CSP is offline - last reported: {{ 'OK' if c.microatm_ok else 'Problem' }}"><span class="dot"></span>Disconnected</span><div class="sub">CSP offline</div>
+          {% elif not c.microatm_configured %}<span class="badge badge-gray"><span class="dot"></span>Not set up</span>
+          {% elif c.microatm_state == 'UNVERIFIED' %}<span class="badge badge-amber" title="Plugged in, but it could not be confirmed to be the right device (a generic entry was picked). Ask the CSP to use Find my device on the agent page."><span class="dot"></span>Unverified</span>
+          {% elif c.microatm_ok %}<span class="badge badge-green"><span class="dot"></span>OK</span>
+          {% else %}<span class="badge badge-red"><span class="dot"></span>Problem</span>{% endif %}
+        </td>
+        <td>{{ device_cell(c, 'biometric') }}</td>
+        <td>{{ device_cell(c, 'gps') }}</td>
+        <td><a class="row-go" href="{{ url_for('ui.csp_detail', csp_id=c.csp_id) }}" aria-label="Open {{ c.csp_id }}">{{ ico('go', 16) }}</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="empty">
+        {{ ico('search', 28) }}
+        {% if problems_only %}No open problems right now.
+        {% elif q or status_filter %}No CSP matches this filter.
+        {% else %}No CSP has reported yet.{% endif %}
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <div class="table-foot">
+    <span>{% if matched %}Showing {{ (page - 1) * page_size + 1 }}&ndash;{{ [page * page_size, matched] | min }} of {{ matched }}{% else %}No results{% endif %}</span>
+    {% if total_pages > 1 %}
+    <nav class="pager" aria-label="Pages">
+      {% if page > 1 %}<a href="{{ qs(page=page-1) }}" aria-label="Previous page">&larr;</a>{% endif %}
+      {% for p in range(1, total_pages + 1) if p == 1 or p == total_pages or (p - page) | abs <= 2 %}
+        {% if not loop.first and p - loop.previtem > 1 %}<span>&hellip;</span>{% endif %}
+        {% if p == page %}<span class="cur" aria-current="page">{{ p }}</span>{% else %}<a href="{{ qs(page=p) }}">{{ p }}</a>{% endif %}
+      {% endfor %}
+      {% if page < total_pages %}<a href="{{ qs(page=page+1) }}" aria-label="Next page">&rarr;</a>{% endif %}
+    </nav>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

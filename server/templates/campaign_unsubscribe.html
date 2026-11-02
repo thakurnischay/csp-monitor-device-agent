@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Email preferences</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; background: #f7f4ee; margin: 0; color: #3f3f3f; }
+  main { max-width: 460px; margin: 60px auto; background: #fff; border-top: 4px solid #ffb218; border-radius: 10px; padding: 28px 30px; }
+  h1 { font-size: 1.25rem; margin: 0 0 12px; }
+  p { line-height: 1.55; }
+  button { background: #ffb218; color: #fff; font-weight: 700; border: 0; border-radius: 8px; padding: 11px 20px; font-size: 1rem; cursor: pointer; }
+  .note { color: #8a8a8a; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+{% if done %}
+  <h1>You have been unsubscribed</h1>
+  <p>{{ masked }} will not receive any more of these emails.</p>
+  <p class="note">If this was a mistake, please tell your Regional Manager.</p>
+{% else %}
+  <h1>Stop these emails?</h1>
+  <p>Confirm that you no longer want to receive emails at <strong>{{ masked }}</strong>.</p>
+  <form method="post" action=""><button type="submit">Unsubscribe</button></form>
+  <p class="note">Nothing changes unless you press the button.</p>
+{% endif %}
+</main>
+</body>
+</html>

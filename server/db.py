@@ -101,6 +101,11 @@ def _migrate_csps_columns(conn):
         "microatm_verified": "INTEGER",
         "biometric_verified": "INTEGER",
         "gps_verified": "INTEGER",
+        # Remote-update support. NULL = a legacy agent that has never reported it (cannot update itself:
+        # it needs the one-time bootstrap). Reported by every agent that has the updater.
+        "update_capable": "INTEGER",
+        "updater_version": "TEXT",
+        "agent_sequence": "INTEGER",
     }
     for col_name, col_type in new_columns.items():
         if col_name not in existing:
@@ -119,4 +124,6 @@ def setup():
                 ("admin", hash_password("admin123"), _now()))
         _migrate_csps_columns(conn)
         _migrate_api_keys_table(conn)
+        import software
+        software.seed_defaults(conn)
         conn.commit()

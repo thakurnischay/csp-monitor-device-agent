@@ -105,3 +105,12 @@ class RateLimiter:
 # Shared limiter instances used by routes.py / api.py.
 login_limiter = RateLimiter(max_events=8, window_seconds=60)       # per IP
 report_limiter = RateLimiter(max_events=6, window_seconds=60)      # per csp_id
+# Enrollment and update endpoints (agent-facing, unauthenticated or key-authenticated only).
+enroll_ip_limiter = RateLimiter(max_events=20, window_seconds=600)    # per source address
+enroll_csp_limiter = RateLimiter(max_events=12, window_seconds=600)   # per CSP code
+update_limiter = RateLimiter(max_events=90, window_seconds=60)        # per csp_id (status + manifest + package)
+campaign_test_limiter = RateLimiter(max_events=5, window_seconds=600)      # test emails, per admin
+campaign_public_limiter = RateLimiter(max_events=240, window_seconds=60)   # open / click / unsubscribe links, per source address
+campaign_events_limiter = RateLimiter(max_events=60, window_seconds=60)    # provider event posts, per source address
+campaign_ai_limiter = RateLimiter(max_events=20, window_seconds=600)       # AI drafts (each costs money), per admin
+

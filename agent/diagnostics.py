@@ -41,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 import deep_checks
 import device_health as dh
 import impact_map
+import outcomes
 
 DEVICES = ("printer", "microatm", "biometric", "gps")
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}
@@ -319,6 +320,12 @@ _cache = {}
 _cache_lock = threading.Lock()
 
 
+def clear_cache():
+    """Forget every cached Windows answer, so the next check reads everything fresh ("Report now" after a fix)."""
+    with _cache_lock:
+        _cache.clear()
+
+
 def reset_cache():
     with _cache_lock:
         _cache.clear()
@@ -398,6 +405,130 @@ def collect_jobs():
     return [j for j in dh._as_list(data) if isinstance(j, dict)]       # [] = no jobs (valid)
 
 
+# Vendor software that drives the devices. Read-only inventory: is it installed, which version, is it open, did Windows record it
+# crashing or hanging (Application Error = event 1000, Application Hang = 1002). The agent only reports FACTS; whether a version is
+# "up to date" is decided on the server from the required versions the administrator sets.
+#   device      which device's diagnosis carries it
+#   tokens/vids the program is EXPECTED only when the attached device's name/maker contains a token or its USB vendor id matches
+#               (so a PC with another make of device is never told it is missing this program)
+#   process     program to watch for "open" and crashes;  service  Windows service whose state/program version is read
+#   paths       program files under Program Files;  sysfiles  files under System32 (driver files);  uninstall  installed-programs name
+#   pnp_maker   fallback: the version of the newest Windows driver from this maker
+WATCHED_SOFTWARE = (
+    {"key": "llt", "device": "microatm", "name": "Ingenico LLT", "process": "jLLT", "alt_processes": ("LLT",), "image": "jLLT.exe",
+     "paths": (r"Ingenico\LLT\jLLT.exe", r"Ingenico\LLT\LLT.exe", r"Ingenico\jLLT\jLLT.exe"), "sysfiles": (), "service": "",
+     "uninstall": r"(^| )j?LLT( |$|_|-)|Local.?Loader", "pnp_maker": "",
+     "search": ("Ingenico", "*LLT*.exe"), "inf_provider": "",
+     "tokens": ("ingenico",), "vids": ("0B00",)},
+    {"key": "usb_drivers", "device": "microatm", "name": "Ingenico USB Drivers", "process": "", "image": "",
+     "paths": (), "sysfiles": (), "service": "", "uninstall": r"Ingenico.*(USB|Driver)|Telium.*USB", "pnp_maker": "Ingenico",
+     "inf_provider": "Ingenico",
+     "tokens": ("ingenico",), "vids": ("0B00",)},
+    {"key": "gps_driver", "device": "gps", "name": "GPS dongle driver (WCH CH341)", "process": "", "image": "",
+     "paths": (), "sysfiles": (r"drivers\CH341S64.SYS", r"drivers\CH341SER.SYS"), "service": "", "uninstall": "",
+     "pnp_maker": "wch", "tokens": ("ch340", "ch341", "ch330", "wch", "qinheng"), "vids": ("1A86", "4348")},
+    {"key": "morpho_rd", "device": "biometric", "name": "Morpho / IDEMIA RD Service", "process": "", "image": "",
+     "paths": (), "sysfiles": (), "service": r"IDEMIA|Morpho|L1.?RD", "uninstall": r"IDEMIA.*RD|Morpho.*RD|L1.?RD.?Service",
+     "pnp_maker": "", "tokens": ("morpho", "idemia", "sagem", "mso"), "vids": ("079B",)},
+)
+MICROATM_SOFTWARE = tuple(s for s in WATCHED_SOFTWARE if s["device"] == "microatm")      # kept for the micro-ATM crash watch
+SOFTWARE_BY_KEY = {s["key"]: s for s in WATCHED_SOFTWARE}
+SOFTWARE_LOOKBACK_DAYS = 7
+SOFTWARE_UNSTABLE_CRASHES = 3          # crashes/hangs within the look-back = "keeps crashing"
+_NAME_OK = re.compile(r"[A-Za-z0-9_.\-]{0,60}")
+_REGEX_OK = re.compile(r"[A-Za-z0-9 .*^$()|+?\\_\-]{0,80}")
+_PATH_OK = re.compile(r"[A-Za-z0-9_.\\\- ()]{1,80}")
+_GLOB_OK = re.compile(r"[A-Za-z0-9_.*\-]{0,40}")
+_UNINSTALL_KEYS = ("'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',"
+                   "'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',"
+                   "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'")
+
+
+def _software_script(sw):
+    """One read-only PowerShell query for one watched program. Every value put into it comes from the constants above
+    and is checked against a strict character set first."""
+    proc, image, maker = sw["process"], sw["image"], sw["pnp_maker"]
+    procs = tuple(p for p in (proc,) + tuple(sw.get("alt_processes", ())) if p)
+    svc, unins = sw.get("service", ""), sw["uninstall"]
+    paths, sysfiles = tuple(sw["paths"]), tuple(sw.get("sysfiles", ()))
+    search_dir, search_glob = sw.get("search") or ("", "")
+    inf = sw.get("inf_provider", "")
+    if not (all(_NAME_OK.fullmatch(p) for p in procs) and _NAME_OK.fullmatch(image) and _NAME_OK.fullmatch(maker)
+            and _NAME_OK.fullmatch(inf) and _NAME_OK.fullmatch(search_dir) and _GLOB_OK.fullmatch(search_glob)
+            and _REGEX_OK.fullmatch(unins) and _REGEX_OK.fullmatch(svc)
+            and all(_PATH_OK.fullmatch(p) for p in paths + sysfiles)):
+        return None
+    parts = ["$inst=$false;$ver='';$src='';$svcrun=$null;"]
+    if sysfiles:                                    # driver files first: their version is clean (e.g. 3.8.2023.2)
+        parts.append("foreach($rel in '" + ";".join(sysfiles) + "'.Split(';')) { $f=Join-Path $env:SystemRoot ('System32\\'+$rel); "
+                     "if(Test-Path $f){ $inst=$true; if(-not $ver){$ver=[string](Get-Item $f).VersionInfo.FileVersion;$src='driver file'} } };")
+    if paths:
+        parts.append("foreach($rel in '" + ";".join(paths) + "'.Split(';')) { foreach($base in ${env:ProgramFiles(x86)},$env:ProgramFiles) "
+                     "{ $f=if($base){Join-Path $base $rel}else{''}; if($f -and (Test-Path $f)) { $inst=$true; "
+                     "if(-not $ver){$ver=[string](Get-Item $f).VersionInfo.FileVersion;$src='program file'} } } };")
+    if unins:
+        parts.append("$u=Get-ItemProperty " + _UNINSTALL_KEYS + " -ErrorAction SilentlyContinue | "
+                     "Where-Object { $_.DisplayName -match '" + unins + "' } | Select-Object -First 1;"
+                     "if($u){$inst=$true;if(-not $ver){$ver=[string]$u.DisplayVersion;$src='installed programs'}};")
+    if svc:
+        parts.append("$sv=Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | "
+                     "Where-Object { $_.Name -match '" + svc + "' -or $_.DisplayName -match '" + svc + "' } | Select-Object -First 1;"
+                     "if($sv){$inst=$true;$svcrun=([string]$sv.State -eq 'Running');"
+                     "$m=[regex]::Match([string]$sv.PathName,'^\\s*\"?([^\"]+?\\.exe)');"
+                     "if($m.Success -and -not $ver){$fv=[string](Get-Item $m.Groups[1].Value -ErrorAction SilentlyContinue).VersionInfo.FileVersion;"
+                     "if($fv){$ver=$fv;$src='service program'}}};")
+    if search_dir and search_glob:                  # the program installed somewhere under the maker's folder
+        parts.append("if(-not $inst){foreach($base in ${env:ProgramFiles(x86)},$env:ProgramFiles,($env:SystemDrive+'\')){ if($base){ "
+                     "$dir=Join-Path $base '" + search_dir + "'; if(Test-Path $dir){ $x=Get-ChildItem -Path $dir -Recurse -Depth 3 "
+                     "-Filter '" + search_glob + "' -ErrorAction SilentlyContinue | Select-Object -First 1; "
+                     "if($x){$inst=$true;$ver=[string]$x.VersionInfo.FileVersion;$src='program file'}}}}};")
+    if inf:                                         # a driver package Windows has installed, even with the device unplugged
+        parts.append("if(-not $inst){$i=Get-ChildItem (Join-Path $env:SystemRoot 'INF\oem*.inf') -ErrorAction SilentlyContinue | "
+                     "Select-String -Pattern '" + inf + "' -List -ErrorAction SilentlyContinue | Select-Object -First 1; "
+                     "if($i){$inst=$true;$src='driver package';$dv=Select-String -Path $i.Path "
+                     "-Pattern 'DriverVer\s*=\s*[^,]*,\s*([0-9.]+)' -ErrorAction SilentlyContinue | Select-Object -First 1; "
+                     "if($dv -and -not $ver){$ver=$dv.Matches[0].Groups[1].Value}}};")
+    if maker:
+        parts.append("if(-not $inst){$d=Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | "
+                     "Where-Object { $_.Manufacturer -match '" + maker + "' -and $_.DriverVersion } | "
+                     "Sort-Object DriverVersion -Descending | Select-Object -First 1; "
+                     "if($d){$inst=$true;$ver=[string]$d.DriverVersion;$src='Windows driver'}};")
+    if procs:
+        parts.append("$p=@(Get-Process -Name " + ",".join("'" + p + "'" for p in procs) + " -ErrorAction SilentlyContinue | "
+                     "ForEach-Object { try { $_.StartTime.ToString('o') } catch { '' } });")
+    else:
+        parts.append("$p=@();")
+    if image:
+        parts.append("$s=(Get-Date).AddDays(-" + str(SOFTWARE_LOOKBACK_DAYS) + ");"
+                     "$e=@(Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=$s;Id=1000,1002} -MaxEvents 500 -ErrorAction SilentlyContinue | "
+                     "Where-Object { $_.Message -like '*" + image + "*' } | ForEach-Object { [pscustomobject]@{I=$_.Id;T=$_.TimeCreated.ToString('o')} });")
+    else:
+        parts.append("$e=@();")
+    parts.append("[pscustomobject]@{running=(($p.Count -gt 0) -or ($svcrun -eq $true));started=@($p);installed=$inst;version=$ver;source=$src;events=@($e)} "
+                 "| ConvertTo-Json -Compress -Depth 4")
+    return "".join(parts)
+
+
+def collect_software():
+    """[{key, name, process, installed, version, source, running, started, crashes:[{id, t}]}] for the watched software.
+    None if Windows could not be asked at all (different from "asked, nothing found")."""
+    out = []
+    for sw in WATCHED_SOFTWARE:
+        script = _software_script(sw)
+        if script is None:
+            continue                                    # names are constants; this only guards a future edit
+        data = _ps(script, 60)
+        if not isinstance(data, dict):
+            return None
+        out.append({"key": sw["key"], "name": sw["name"], "process": sw["process"], "installed": bool(data.get("installed")),
+                    "version": str(data.get("version") or "")[:40], "source": str(data.get("source") or "")[:40],
+                    "running": bool(data.get("running")),
+                    "started": [_parse_time(t) for t in dh._as_list(data.get("started")) if t],
+                    "crashes": [{"id": e.get("I"), "t": _parse_time(e.get("T"))}
+                                for e in dh._as_list(data.get("events")) if isinstance(e, dict)]})
+    return out
+
+
 def collect():
     """All evidence, gathered in parallel. A source that failed is None, which
     is different from "checked and found nothing" ([]) - the rules rely on it."""
@@ -405,7 +536,8 @@ def collect():
             "drivers": lambda: _cached("drivers", 6 * 3600, collect_drivers),
             "events": lambda: _cached("events", 600, collect_events),
             "printers": lambda: _cached("printers", 30, collect_printers),
-            "jobs": lambda: _cached("jobs", 30, collect_jobs)}
+            "jobs": lambda: _cached("jobs", 30, collect_jobs),
+            "software": lambda: _cached("software", 120, collect_software)}
     out = {}
     threads = []
 
@@ -791,6 +923,115 @@ def _printer_findings(status, ctx, row, notes):
     return out
 
 
+def _software_findings(ctx):
+    """Micro-ATM vendor software (e.g. Ingenico LLT): report crashes/hangs the Windows event log recorded.
+    Report-only: "not running" is information, never a fault (the software may simply not be in use), and nothing is
+    ever restarted automatically (it could interrupt a customer's transaction).
+    -> (findings, notes, checked). Silent when the evidence is missing or the software is not on this PC."""
+    programs = ctx["evidence"].get("software")
+    now = ctx["now"]
+    findings, notes, checked = [], [], []
+    for p in programs or []:
+        if not p.get("process"):
+            continue                                              # e.g. a driver package: versions only, no crash watch
+        if not (p.get("installed") or p.get("running") or p.get("crashes")):
+            continue                                              # not a PC that uses it: say nothing
+        label = p["name"]
+        checked.append(f"Whether {label} is open, and whether Windows recorded it crashing or hanging in the last "
+                       f"{SOFTWARE_LOOKBACK_DAYS} days (read-only)")
+        crashes = [c for c in p.get("crashes", []) if c.get("t")]
+        recent = [c for c in crashes if c["t"] >= now - timedelta(hours=24)]
+        last = max((c["t"] for c in crashes), default=None)
+        n_crash = sum(1 for c in crashes if c.get("id") == 1000)
+        n_hang = sum(1 for c in crashes if c.get("id") == 1002)
+        evidence = [f"Windows recorded {n_crash} crash(es) and {n_hang} hang(s) of {label} in the last {SOFTWARE_LOOKBACK_DAYS} days",
+                    f"The most recent was {_ago(last, now)}" if last else "",
+                    f"{label} is open right now" if p.get("running") else f"{label} is not open right now"]
+        if len(crashes) >= SOFTWARE_UNSTABLE_CRASHES:
+            f = finding(
+                "SOFTWARE_UNSTABLE", "microatm", "SOFTWARE_ISSUE", f"The micro-ATM software ({label}) keeps crashing",
+                f"{label} stopped unexpectedly {len(crashes)} times in {SOFTWARE_LOOKBACK_DAYS} days, so micro-ATM transactions may fail.",
+                "The program itself is unstable (a damaged install, a conflict with other software, or a problem underneath it). "
+                "The device is not the cause: Windows still sees it.",
+                "confirmed", evidence,
+                ["Restart the PC once, then open the software again and check it stays open.",
+                 "Do not repeat a payment if one was in progress when it crashed: check its status first.",
+                 f"If it still crashes, repair or reinstall {label} from the official SBI / Ingenico package only (not copies from unknown sources).",
+                 "Tell the support team the crash times listed above."],
+                category="software")
+            f["min_severity"] = "medium"
+            findings.append(f)
+        elif recent:
+            f = finding(
+                "SOFTWARE_CRASHED", "microatm", "SOFTWARE_ISSUE", f"The micro-ATM software ({label}) crashed recently",
+                f"{label} stopped unexpectedly in the last 24 hours.",
+                "Windows recorded the program crashing or freezing. A single crash is often a one-off.",
+                "confirmed", evidence,
+                [f"Open {label} again from its desktop shortcut and wait for it to finish starting before the next transaction.",
+                 "Do not repeat a payment if one was in progress when it crashed: check its status first.",
+                 "If it crashes again, the agent will flag it as unstable."],
+                category="software")
+            f["min_severity"] = "low" if p.get("running") else "medium"
+            findings.append(f)
+        elif crashes:
+            notes.append(f"{label} crashed or hung {len(crashes)} time(s) in the last {SOFTWARE_LOOKBACK_DAYS} days "
+                         f"(last {_ago(last, now)}); none in the last 24 hours.")
+        if not findings and not p.get("running"):
+            notes.append(f"{label} is not open right now (normal if it is not being used).")
+    return findings, notes, checked
+
+
+def _device_text(dev, status, ctx):
+    """Lower-case text identifying the attached device (name, maker, saved selection) and its USB vendor id."""
+    row = status.get("_row") or {}
+    cfg = ctx.get("cfg") or {}
+    text = " ".join(str(x) for x in (row.get("name"), row.get("manufacturer"), row.get("vendor"), status.get("resolved_name"),
+                                     cfg.get(dev + "_name"))).lower()
+    return text, str(row.get("instance") or "").upper()
+
+
+def _is_expected(sw, status, ctx):
+    """True when the attached device is of the make this program belongs to (so its absence is a real problem)."""
+    text, inst = _device_text(sw["device"], status, ctx)
+    return any(t in text for t in sw["tokens"]) or any("VID_" + v in inst for v in sw["vids"])
+
+
+def _rd_answered(status, sw):
+    """A fingerprint-scanner RD service of this make answered on its local port: it is installed and running, whatever
+    the installed-programs list says. (Safety net so a working scanner is never reported as 'not installed'.)"""
+    if sw["key"] != "morpho_rd":
+        return False
+    return any(any(t in str(r.get("info") or "").lower() for t in sw["tokens"])
+               for r in (status.get("rd") or []) if isinstance(r, dict))
+
+
+def _software_inventory(dev, status, ctx):
+    """What the server needs to judge this device's vendor software: facts only (installed / version / open / crashes).
+    None when the Windows query did not answer or no software is watched for this device."""
+    programs = ctx["evidence"].get("software")
+    if programs is None:
+        return None
+    now = ctx["now"]
+    out = []
+    for p in programs:
+        sw = SOFTWARE_BY_KEY.get(p.get("key"))
+        if not sw or sw["device"] != dev:
+            continue
+        crashes = [c for c in p.get("crashes", []) if c.get("t")]
+        last = max((c["t"] for c in crashes), default=None)
+        answered = _rd_answered(status, sw)
+        installed = bool(p.get("installed")) or answered
+        has_state = bool(p.get("process") or sw.get("service"))
+        out.append({"key": sw["key"], "name": sw["name"], "installed": installed,
+                    "version": p.get("version") or "",
+                    "source": p.get("source") or ("RD service answered" if answered and not p.get("installed") else ""),
+                    "running": (bool(p.get("running")) or answered) if has_state else None,
+                    "expected": _is_expected(sw, status, ctx),
+                    "crashes_7d": len(crashes), "crashes_24h": sum(1 for c in crashes if c["t"] >= now - timedelta(hours=24)),
+                    "last_crash_at": _iso(last) if last else None})
+    return out or None
+
+
 def _not_connected(dev, ctx):
     hist, now = ctx["history"], ctx["now"]
     last = hist.last_present(dev)
@@ -852,8 +1093,17 @@ def diagnose_device(dev, status, ctx):
         if present and ev.get(source) is None and dev in ("biometric", "microatm", "printer"):
             not_checked.append(text)
 
+    if dev == "microatm":
+        sw_findings, sw_notes, sw_checked = _software_findings(ctx)
+        findings = list(findings) + sw_findings
+        notes = list(notes) + sw_notes
+        checked += sw_checked
+
     for f in findings:
         f["severity"] = severity_for(f, impact)
+        floor = f.pop("min_severity", None)
+        if floor in SEVERITY_ORDER and SEVERITY_ORDER[floor] < SEVERITY_ORDER[f["severity"]]:
+            f["severity"] = floor                            # e.g. a crashed banking program is never just "low"
         f.pop("was_recently_present", None)
     findings.sort(key=lambda f: (SEVERITY_ORDER[f["severity"]],
                                  STATE_PRIORITY.index(f["state"]) if f["state"] in STATE_PRIORITY else 99))
@@ -877,11 +1127,17 @@ def diagnose_device(dev, status, ctx):
                         "codes": sorted({r["code"] for r in recovered}),
                         "note": "The earlier problem is gone and the latest checks pass."}
     last_ok = hist.last_healthy(dev)
-    return {"health_state": health_state, "severity": severity, "summary": summary,
+    software = _software_inventory(dev, status, ctx)
+    if software is not None:
+        checked.append(f"Which {LABEL[dev]} software is installed and its version (read-only)")
+    result = {"health_state": health_state, "severity": severity, "summary": summary,
             "findings": findings[:8], "notes": [_clip(n, 220) for n in notes][:6],
             "checked": checked, "not_checked": not_checked, "impact": impact,
             "last_healthy_at": _iso(last_ok) if last_ok else None, "verification": verification,
             "actions_taken": hist.actions(dev)[-5:]}
+    if software is not None:
+        result["software"] = software
+    return result
 
 
 def analyze(health, cfg, functional=None, history=None, evidence=None, impact=None, now=None):
@@ -891,7 +1147,7 @@ def analyze(health, cfg, functional=None, history=None, evidence=None, impact=No
     try:
         evidence = evidence if evidence is not None else collect()
     except Exception:
-        evidence = {"services": None, "drivers": None, "events": None, "printers": None, "jobs": None}
+        evidence = {"services": None, "drivers": None, "events": None, "printers": None, "jobs": None, "software": None}
     impact = impact or impact_map.load()
     functional = functional or {}
     if functional.get("ran") and cfg is not None:
@@ -920,6 +1176,10 @@ def analyze(health, cfg, functional=None, history=None, evidence=None, impact=No
                 if f["severity"] == "high":
                     f["severity"] = "critical"
             result[d]["summary"] += " (several services are down at this CSP)"
+    try:                                         # remember what happened to each problem (records only; changes nothing)
+        outcomes.for_history(history).observe(result, now)
+    except Exception:
+        pass
     return result
 
 
@@ -958,6 +1218,10 @@ def start_service(service, diagnosis, history=None, now=None, runner=None):
                                         "It is not retried automatically - the cause needs to be found (see the steps shown)."}
     ok, detail = runner(service)
     history.record_action(dev, "start_service", service, "ok" if ok else _clip(detail, 160), now)
+    try:
+        outcomes.for_history(history).record_action(dev, target.get("code"), "start_service", service, "ok" if ok else "failed", now)
+    except Exception:
+        pass
     reset_cache()                    # the next check must see the NEW state, not a cached "stopped"
     deep_checks.clear_cache()
     if ok:

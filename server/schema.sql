@@ -138,3 +138,368 @@ CREATE TABLE IF NOT EXISTS device_issues (
 );
 CREATE INDEX IF NOT EXISTS idx_issues_csp ON device_issues(csp_id, device, status);
 
+-- ===================================================================================================
+-- Secure enrollment + centralized signed updates (additive: nothing above is changed or dropped).
+-- ===================================================================================================
+
+-- The administrator's list of real CSPs. A CSP that already has an API key is also treated as registered.
+CREATE TABLE IF NOT EXISTS csp_registry (
+    csp_id        TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    pre_approved  INTEGER NOT NULL DEFAULT 0,      -- 1 = a matching first enrollment is approved automatically
+    created_at    TEXT NOT NULL
+);
+
+-- A new agent asks for credentials. The agent generated the key itself; only its HASH is stored here.
+-- Nothing is usable until an administrator approves (or the CSP was pre-approved by one).
+CREATE TABLE IF NOT EXISTS enrollments (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    csp_id            TEXT NOT NULL,
+    requested_name    TEXT NOT NULL,
+    registry_name     TEXT,
+    hostname          TEXT,
+    machine_id        TEXT,
+    agent_version     TEXT,
+    remote_addr       TEXT,
+    key_hash          TEXT NOT NULL,
+    key_suffix        TEXT NOT NULL DEFAULT '',
+    replaces_existing INTEGER NOT NULL DEFAULT 0,  -- 1 = this CSP already has an agent/key
+    status            TEXT NOT NULL DEFAULT 'PENDING',   -- PENDING / APPROVED / REJECTED / SUPERSEDED
+    created_at        TEXT NOT NULL,
+    decided_at        TEXT,
+    decided_by        TEXT,
+    note              TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_enroll_status ON enrollments(status, csp_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_enroll_key ON enrollments(key_hash);
+
+-- Signed agent releases. The package file lives on disk (see updates.release_dir()); only its metadata is here.
+CREATE TABLE IF NOT EXISTS agent_releases (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    version            TEXT NOT NULL UNIQUE,
+    sequence           INTEGER NOT NULL UNIQUE,          -- strictly increasing: agents never go down
+    kind               TEXT NOT NULL DEFAULT 'release',  -- release / rollback
+    notes              TEXT,
+    key_id             TEXT,
+    manifest_b64       TEXT NOT NULL,                    -- the exact signed bytes
+    signature_b64      TEXT NOT NULL,
+    package_sha256     TEXT NOT NULL,
+    package_size       INTEGER NOT NULL,
+    package_path       TEXT NOT NULL,
+    min_agent_sequence INTEGER NOT NULL DEFAULT 0,
+    status             TEXT NOT NULL DEFAULT 'UPLOADED', -- UPLOADED / APPROVED / REVOKED
+    uploaded_by        TEXT,
+    uploaded_at        TEXT NOT NULL,
+    approved_by        TEXT,
+    approved_at        TEXT,
+    revoked_by         TEXT,
+    revoked_at         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rollouts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    release_id  INTEGER NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'pilot',       -- pilot / full / expansion
+    status      TEXT NOT NULL DEFAULT 'ACTIVE',      -- ACTIVE / PAUSED / CANCELLED
+    note        TEXT,
+    created_by  TEXT,
+    created_at  TEXT NOT NULL
+);
+
+-- One row per (CSP, release): re-assigning the same release to the same CSP is a no-op (idempotent).
+CREATE TABLE IF NOT EXISTS update_deployments (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    rollout_id    INTEGER NOT NULL,
+    release_id    INTEGER NOT NULL,
+    csp_id        TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    detail        TEXT,
+    attempt       INTEGER NOT NULL DEFAULT 1,
+    from_version  TEXT,
+    created_at    TEXT NOT NULL,
+    assigned_at   TEXT,
+    updated_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    last_error    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_deploy_csp_release ON update_deployments(csp_id, release_id);
+CREATE INDEX IF NOT EXISTS idx_deploy_csp_status ON update_deployments(csp_id, status);
+
+CREATE TABLE IF NOT EXISTS csp_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    created_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS csp_group_members (
+    group_id  INTEGER NOT NULL,
+    csp_id    TEXT NOT NULL,
+    PRIMARY KEY (group_id, csp_id)
+);
+
+
+-- Required versions of vendor software that drives the micro-ATM (set by an administrator; see software.py).
+-- Rows are never deleted, only deactivated, so the initial values are seeded exactly once.
+CREATE TABLE IF NOT EXISTS software_requirements (
+    key          TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    min_version  TEXT NOT NULL,
+    note         TEXT,
+    active       INTEGER NOT NULL DEFAULT 1,
+    updated_by   TEXT,
+    updated_at   TEXT
+);
+
+-- ============================================================================================================
+-- Email Campaigns (festival / occasion emails to operators who lack a device). All additive.
+-- The stable operator identity is the CSP code (upper-case, no spaces) - the same value the monitoring agents use
+-- as csp_id. Operator data is an IMPORTED SNAPSHOT owned by the CSP Growth Platform; it is never written back, and
+-- re-importing never touches campaign history (campaign_* / email_* tables hold their own copy of what was sent).
+-- ============================================================================================================
+CREATE TABLE IF NOT EXISTS operator_imports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    imported_at     TEXT NOT NULL,
+    imported_by     TEXT,
+    source_name     TEXT,
+    source_stamp    TEXT,                 -- when the source file says it was produced
+    rows_total      INTEGER NOT NULL DEFAULT 0,
+    rows_accepted   INTEGER NOT NULL DEFAULT 0,
+    rows_skipped    INTEGER NOT NULL DEFAULT 0,
+    summary_json    TEXT
+);
+CREATE TABLE IF NOT EXISTS campaign_operators (
+    csp_code            TEXT PRIMARY KEY,
+    name                TEXT,
+    email               TEXT,
+    mobile              TEXT,
+    rm                  TEXT,
+    state               TEXT,
+    district            TEXT,
+    activity            TEXT,             -- ACTIVE / DORMANT / INACTIVE (the email project's own rule)
+    activity_reason     TEXT,
+    contactable         INTEGER,
+    engine_input_json   TEXT,             -- the fields the ownership rules read (claims, transaction counts)
+    present_in_latest   INTEGER NOT NULL DEFAULT 1,   -- 0 = not in the newest import (kept, but never emailed)
+    first_imported_at   TEXT,
+    updated_at          TEXT,
+    last_import_id      INTEGER
+);
+CREATE TABLE IF NOT EXISTS operator_devices (
+    csp_code    TEXT NOT NULL,
+    device      TEXT NOT NULL,            -- MATM / PRINTER / GPS / BIOMETRIC
+    verdict     TEXT NOT NULL,            -- OWNED / GAP_VERIFIED / GAP_DISPUTED / UNKNOWN
+    evidence    TEXT,
+    source      TEXT,                     -- calling_sheet / monitoring_agent / reconciliation
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (csp_code, device)
+);
+-- Human decisions (an RM phoned the CSP): they beat every inferred signal, exactly as in the email project.
+CREATE TABLE IF NOT EXISTS operator_reconciliations (
+    csp_code    TEXT NOT NULL,
+    device      TEXT NOT NULL,
+    owns_device INTEGER NOT NULL,
+    decided_by  TEXT,
+    decided_at  TEXT,
+    note        TEXT,
+    PRIMARY KEY (csp_code, device)
+);
+
+CREATE TABLE IF NOT EXISTS email_campaigns (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                 TEXT NOT NULL,
+    description          TEXT,
+    occasion             TEXT NOT NULL,
+    devices_json         TEXT NOT NULL,                 -- devices the audience must lack, e.g. ["GPS","BIOMETRIC"]
+    audience_match       TEXT NOT NULL DEFAULT 'any',   -- any: lacks at least one selected device / all: lacks every one
+    include_dormant      INTEGER NOT NULL DEFAULT 0,
+    subject              TEXT NOT NULL,
+    body                 TEXT NOT NULL,
+    link_url             TEXT,
+    link_label           TEXT,
+    status               TEXT NOT NULL DEFAULT 'draft', -- draft / scheduled / queued / sending / paused / completed / cancelled
+    mode                 TEXT,                          -- dry / live (decided when launched or scheduled)
+    scheduled_at         TEXT,
+    created_by           TEXT,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    launched_by          TEXT,
+    launched_at          TEXT,
+    completed_at         TEXT,
+    cancelled_at         TEXT,
+    config_snapshot_json TEXT,                          -- the exact configuration at launch (audit)
+    outcome_json         TEXT
+);
+CREATE TABLE IF NOT EXISTS email_campaign_recipients (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id         INTEGER NOT NULL REFERENCES email_campaigns(id),
+    csp_code            TEXT NOT NULL,
+    bucket              TEXT NOT NULL,                  -- eligible / excluded / review
+    reason              TEXT NOT NULL,                  -- why this operator is in / out, in plain words
+    details_json        TEXT,                           -- every check that was evaluated
+    missing_devices_json TEXT,                          -- devices CONFIRMED absent (named in the email)
+    review_devices_json  TEXT,                          -- devices whose ownership is unknown or in conflict
+    email_at_send       TEXT,
+    name_at_send        TEXT,
+    rm_at_send          TEXT,
+    location_at_send    TEXT,
+    status              TEXT NOT NULL DEFAULT 'pending', -- pending / queued / sending / accepted / failed / unknown_outcome / cancelled
+    delivery_status     TEXT NOT NULL DEFAULT 'not_confirmed', -- not_confirmed / delivered / bounced / complained (set ONLY by provider events)
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at     TEXT,
+    last_error          TEXT,
+    failure_kind        TEXT,                           -- transient_exhausted / permanent
+    smtp_message_id     TEXT,                           -- the Message-ID we put on the message (not a provider receipt)
+    subject_sent        TEXT,
+    body_html           TEXT,
+    body_text           TEXT,
+    token               TEXT NOT NULL UNIQUE,           -- unguessable; used by the unsubscribe / open / click links
+    accepted_at         TEXT,
+    delivered_at        TEXT,
+    first_open_at       TEXT,
+    open_count          INTEGER NOT NULL DEFAULT 0,
+    first_click_at      TEXT,
+    click_count         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    UNIQUE (campaign_id, csp_code)                      -- one operator, one message per campaign: the duplicate guard
+);
+CREATE INDEX IF NOT EXISTS idx_ecr_campaign_status ON email_campaign_recipients(campaign_id, status);
+CREATE INDEX IF NOT EXISTS idx_ecr_csp ON email_campaign_recipients(csp_code);
+CREATE INDEX IF NOT EXISTS idx_ecr_msgid ON email_campaign_recipients(smtp_message_id);
+CREATE TABLE IF NOT EXISTS email_attempts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_id    INTEGER NOT NULL REFERENCES email_campaign_recipients(id),
+    attempt_no      INTEGER NOT NULL,
+    mode            TEXT NOT NULL,                      -- dry / live
+    started_at      TEXT NOT NULL,
+    finished_at     TEXT,
+    outcome         TEXT,                               -- dry_run / accepted / transient_failure / permanent_failure
+    smtp_message_id TEXT,
+    error           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_attempts_recipient ON email_attempts(recipient_id);
+CREATE TABLE IF NOT EXISTS email_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_id    INTEGER NOT NULL REFERENCES email_campaign_recipients(id),
+    kind            TEXT NOT NULL,                      -- accepted / delivered / bounced / complained / open / click / unsubscribed
+    occurred_at     TEXT NOT NULL,
+    source          TEXT NOT NULL,                      -- smtp / provider / pixel / link
+    external_id     TEXT,                               -- provider's own event id (for de-duplication)
+    detail          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_recipient ON email_events(recipient_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_external ON email_events(recipient_id, kind, external_id) WHERE external_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS email_suppressions (
+    email               TEXT PRIMARY KEY,               -- lower-case
+    csp_code            TEXT,
+    reason              TEXT NOT NULL,                  -- unsubscribed / bounced / complaint / manual
+    source_campaign_id  INTEGER,
+    created_at          TEXT NOT NULL,
+    created_by          TEXT
+);
+
+-- ============================================================================================================
+-- AI drafting telemetry (campaign subject / message drafts). Additive.
+-- One immutable row per model call holds the FULL execution chain: prompt + injected context chunks + model output. The
+-- user's corrections are a separate append-only event log, written asynchronously so telemetry never slows the page.
+-- Nothing here ever holds an operator's name, email, mobile number or CSP code: they are removed before the model is called.
+-- ============================================================================================================
+CREATE TABLE IF NOT EXISTS ai_generations (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at         TEXT NOT NULL,
+    created_by         TEXT,
+    campaign_id        INTEGER,                   -- set when the draft is saved into a campaign
+    kind               TEXT NOT NULL DEFAULT 'campaign_draft',
+    provider           TEXT NOT NULL DEFAULT 'anthropic',
+    model              TEXT,
+    prompt_version     TEXT,
+    effort             TEXT,
+    brief_redacted     TEXT,                      -- what the user typed, after personal data was removed
+    redaction_json     TEXT,                      -- what was removed (counts and kinds, never the values)
+    system_prompt      TEXT,
+    user_prompt        TEXT,
+    context_json       TEXT,                      -- immutable snapshot: every candidate chunk, its score, included or not, and why
+    context_tokens_est INTEGER,
+    token_budget       INTEGER,
+    input_tokens       INTEGER,                   -- reported by the API
+    output_tokens      INTEGER,
+    cache_read_tokens  INTEGER,
+    latency_ms         INTEGER,
+    request_id         TEXT,
+    stop_reason        TEXT,
+    fallback_used      INTEGER NOT NULL DEFAULT 0,
+    status             TEXT NOT NULL,             -- ok / invalid_output / error / refused
+    error              TEXT,
+    output_subject     TEXT,
+    output_body        TEXT,
+    cited_context_json TEXT,                      -- chunk ids the model says it used (model-reported)
+    review_flags_json  TEXT,                      -- phrases the checks want a person to look at (heuristic, NOT model confidence)
+    est_cost_usd       REAL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_gen_campaign ON ai_generations(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ai_gen_created ON ai_generations(created_at);
+CREATE TABLE IF NOT EXISTS ai_feedback (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    generation_id    INTEGER NOT NULL REFERENCES ai_generations(id),
+    campaign_id      INTEGER,
+    occurred_at      TEXT NOT NULL,
+    actor            TEXT,
+    event            TEXT NOT NULL,               -- draft_saved / regenerated / previewed / dry_run / test_sent / launched / abandoned
+    final_subject    TEXT,
+    final_body       TEXT,
+    subject_distance INTEGER,                     -- Levenshtein distance, generated -> user's text
+    body_distance    INTEGER,
+    edit_ratio       REAL,                        -- total distance / longer text length (0 = untouched, 1 = completely rewritten)
+    outcome          TEXT,                        -- unchanged / edited / rewritten (for draft_saved, launched)
+    detail           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_fb_generation ON ai_feedback(generation_id);
+CREATE INDEX IF NOT EXISTS idx_ai_fb_event ON ai_feedback(event, occurred_at);
+CREATE TABLE IF NOT EXISTS ai_eval_runs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at     TEXT NOT NULL,
+    finished_at    TEXT,
+    prompt_version TEXT,
+    model          TEXT,
+    mode           TEXT NOT NULL,                 -- offline (harness check with a stand-in) / live (the real model)
+    cases_total    INTEGER NOT NULL DEFAULT 0,
+    cases_passed   INTEGER NOT NULL DEFAULT 0,
+    details_json   TEXT
+);
+
+-- ===================================================================================================
+-- Diagnosis learning (stage 2): what happened to each problem the agents diagnosed, and what the administrator thinks of
+-- the diagnoses. Records only; nothing here changes any diagnosis or rule.
+-- ===================================================================================================
+CREATE TABLE IF NOT EXISTS diagnosis_outcomes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    csp_id        TEXT NOT NULL,
+    device        TEXT NOT NULL,
+    code          TEXT NOT NULL,
+    first_seen    TEXT NOT NULL,
+    resolved_at   TEXT NOT NULL,
+    duration_s    INTEGER NOT NULL DEFAULT 0,
+    checks        INTEGER NOT NULL DEFAULT 1,
+    confidence    TEXT,
+    severity      TEXT,
+    offered_fix   TEXT,
+    resolution    TEXT NOT NULL,                 -- after_fix | self_resolved
+    recurred      INTEGER NOT NULL DEFAULT 0,
+    actions_json  TEXT,
+    agent_version TEXT,
+    received_at   TEXT NOT NULL,
+    UNIQUE (csp_id, device, code, first_seen)
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_code ON diagnosis_outcomes(device, code, resolved_at);
+
+CREATE TABLE IF NOT EXISTS diagnosis_feedback (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL,
+    admin       TEXT NOT NULL,
+    csp_id      TEXT NOT NULL,
+    device      TEXT NOT NULL,
+    code        TEXT NOT NULL,
+    issue_id    INTEGER,
+    verdict     TEXT NOT NULL,                   -- correct | wrong | unclear
+    note        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dfeedback_code ON diagnosis_feedback(device, code);

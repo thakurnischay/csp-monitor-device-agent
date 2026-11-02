@@ -1,3 +1,6 @@
 venv
 __pycache__
 monitor.db
+
+# Live Growth Platform operator data and order history must never be baked into an image
+growth_platform/data/

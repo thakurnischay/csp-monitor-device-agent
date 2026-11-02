@@ -638,6 +638,17 @@ def printer_functional_test(printer_name: str, wait_seconds: int = 6) -> dict:
     return {"ran": True, "ok": True, "detail": "test page sent — printer accepted it with no reported error"}
 
 
+_PROCESS_IMAGE = re.compile(r"[A-Za-z0-9_.\- ]{1,60}\.exe", re.I)
+PROCESS_NAME_HELP = ("Enter one program file name exactly as Task Manager's Details tab shows it, ending in .exe "
+                     "(for example MicroATM.exe) - or leave it blank.")
+
+
+def valid_process_name(name: str) -> bool:
+    """One Windows program image name ("MicroATM.exe"). A product name or a list ("Ingenico LLT, Ingenico USB
+    Drivers") can never match a running process, so it would raise a permanent false 'not running' alarm."""
+    return bool(_PROCESS_IMAGE.fullmatch((name or "").strip()))
+
+
 def process_running(process_name: str) -> dict:
     """Best-effort check for whether a process with this exact image name
     (e.g. "MicroATM.exe", as seen in Task Manager's Details tab) is currently
@@ -647,6 +658,9 @@ def process_running(process_name: str) -> dict:
     process_name = (process_name or "").strip()
     if not process_name:
         return {"configured": False, "running": False}
+    if not valid_process_name(process_name):
+        # not a program file name: watching it would only ever say "not running" - ignore it
+        return {"configured": False, "running": False, "invalid": True}
     try:
         r = subprocess.run(
             ["tasklist", "/FI", f"IMAGENAME eq {process_name}", "/NH"],

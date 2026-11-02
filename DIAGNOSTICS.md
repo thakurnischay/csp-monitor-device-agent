@@ -100,6 +100,50 @@ purchase.
 | Automatic driver reinstall / software repair | deliberately not automatic: needs the vendor-approved package and operator approval |
 | How GPS is used by the CSP application | operations input (stays "impact not established" until given) |
 
+## 3b. Vendor software watch (agent 2.2.0)
+
+A device can be plugged in and healthy while the vendor software behind it is missing, old or crashing. For each device the agent
+reports **facts**, read-only, and only when the attached device is of the make that software belongs to (name/maker or USB vendor id):
+
+| Device | Program | Detected through | Open? / crashes |
+|---|---|---|---|
+| Micro-ATM (Ingenico, VID `0B00`) | **Ingenico LLT** (`jLLT`) | installed programs, program file version | open yes/no; Windows events 1000 (crash) and 1002 (hang), 7 days |
+| Micro-ATM (Ingenico) | **Ingenico USB Drivers** | installed programs, else Windows driver list | n/a |
+| GPS dongle (WCH CH340/CH341, VID `1A86`/`4348`) | **GPS dongle driver (WCH CH341)** | driver files `System32\drivers\CH341S64.SYS` / `CH341SER.SYS`, else Windows driver list | n/a |
+| Fingerprint scanner (Morpho / IDEMIA / Sagem, VID `079B`) | **Morpho / IDEMIA RD Service** | Windows service + its program version, installed programs; **a Morpho RD service answering on its local port also counts as installed** | service running; stopped/crashing services are already covered by the service findings |
+
+The **server decides** what is acceptable, from the *required versions* an administrator sets on the dashboard's **Software**
+page. Initial values come from the supplied SBI packages: LLT **5.2.4**, Ingenico USB Drivers **3.12**, GPS driver **3.8.2023.2**
+(the zip is labelled "8.0" but the WCH driver inside is 3.8.2023.02, which is what Windows reports) and Morpho/IDEMIA RD Service
+**5.0.0.10**. When a new version is released, change one number there: every CSP is judged against it on its next report, and the
+page itself updates at once, with **no agent update**. A requirement can be switched off (e.g. if a check ever misfires).
+
+| Situation | Result |
+|---|---|
+| Not that make of device, or requirement switched off | Not judged ("Not needed") |
+| Required software **not installed** | issue `SOFTWARE_MISSING_<PROGRAM>`, severity **high** |
+| Installed **older** than required (compared as numbers: 5.10 > 5.9; `02/11/2023 3.8.2023.02` is read as 3.8.2023.2) | `SOFTWARE_OUTDATED_<PROGRAM>`, **medium** |
+| Version could not be read | "Version unknown" (shown, never an alarm) |
+| LLT crashed/hung in the last 24 h | `SOFTWARE_CRASHED` (agent-side): *low* if open again, *medium* if closed |
+| 3 or more LLT crashes/hangs in 7 days | `SOFTWARE_UNSTABLE`: at least *medium* |
+| LLT closed, no crashes | A note only ("normal if not in use") - never a fault |
+
+Issues open and close like every other diagnosis (history, "recovery verified"). Each CSP's page has a software table under the
+device it belongs to, and the **Software** page shows the whole fleet, worst first, with totals.
+
+Report-only by design: nothing is ever restarted, installed or changed by the agent (it could interrupt a customer's
+transaction), and the findings carry no automatic fix. The steps tell the operator not to repeat a payment that was in progress
+and to install only from the official packages. The older per-CSP `software_process` setting is **not** used (it marks the
+device unhealthy whenever the program is closed). The watched list is `WATCHED_SOFTWARE` in `agent/diagnostics.py`; the programs,
+labels and initial versions are in `server/software.py`.
+
+**Not covered / not yet proven on a real PC:** the version of the application loaded *inside* the micro-ATM terminal (the YONO
+`.P3A`/`.AGN` packages) - it lives on the device and cannot be read from the PC; crashes that leave no Windows event; what happens
+inside the programs. The GPS driver and Morpho RD checks use the file/service names from the supplied packages and were tested
+with real Windows files and services as stand-ins and with simulated reports, **not yet against a PC that really has those
+installed** - if a check ever reports an installed program as missing, switch its requirement off on the Software page and tell
+the support team (the page's note says the same to operators).
+
 ## 4. Safety
 
 * Read-only diagnostics only. No live financial transaction, no fingerprint or

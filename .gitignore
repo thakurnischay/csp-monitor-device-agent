@@ -27,3 +27,6 @@ tools/dist/
 # agent local state
 agent/diagnostic_history.json
 agent/impact_map.json
+
+# Growth Platform (merged at /growth): live operator data and order history - never commit
+server/growth_platform/data/

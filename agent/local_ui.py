@@ -47,6 +47,7 @@ PAGE = """
 <h1>CSP Device Monitor Agent</h1>
 <p>Reports passbook-printer and micro-ATM connectivity to the central dashboard every few minutes.</p>
 
+<div id="enrollBanner" class="card" style="display:none"></div>
 <div class="card">
   <div id="scanBanner" style="display:none;background:#fdecea;color:#8a1c14;border:1px solid #f5c2bd;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:0.9rem"></div>
   <div class="row"><span><strong>Passbook printer</strong></span><span id="printerBadge" class="badge off">checking...</span></div>
@@ -116,7 +117,7 @@ PAGE = """
     process name here (check Task Manager's Details tab while it's open) lets
     this also catch "device is fine but the software crashed."
   </div>
-  <label>Process name (e.g. MicroATM.exe)</label>
+  <label>Process name - one program file ending in .exe (e.g. MicroATM.exe). Not the product name.</label>
   <input id="softwareProcess" placeholder="leave blank if unknown">
   <button onclick="saveSoftware()">Save software process</button>
 </div>
@@ -343,6 +344,13 @@ function loadStatus() {
   xhrJson("GET", "/status", null, function (d) {
     clearTimeout(slowTimer);
     if (!d) { document.getElementById("msg").textContent = "Could not load status from the agent - is it still running?"; return; }
+    var eb = document.getElementById("enrollBanner"), en = d.enrollment || {};
+    if (en.status && en.status !== "approved") {
+      eb.style.display = "block";
+      eb.textContent = (en.status === "pending" || en.status === "error")
+        ? "Registration for " + (en.csp_name || en.csp_id) + " (" + en.csp_id + "): waiting for the administrator to approve this PC. Monitoring starts by itself once approved."
+        : "Registration problem: " + (en.message || en.status);
+    } else { eb.style.display = "none"; }
     var sb2 = document.getElementById("scanBanner");
     if (d.scan_problem) { sb2.textContent = d.scan_problem; sb2.style.display = "block"; }
     else { sb2.style.display = "none"; }
@@ -362,7 +370,8 @@ function loadStatus() {
     document.getElementById("cspId").value = d.config.csp_id || "";
     document.getElementById("softwareProcess").value = d.config.software_process || "";
     var sb = document.getElementById("softwareBadge");
-    if (!d.software.configured) { sb.textContent = "not set"; sb.className = "badge off"; }
+    if (d.software.invalid) { sb.textContent = "ignored - not a .exe name"; sb.className = "badge off"; }
+    else if (!d.software.configured) { sb.textContent = "not set"; sb.className = "badge off"; }
     else if (d.software.running) { sb.textContent = "running"; sb.className = "badge ok"; }
     else { sb.textContent = "not running"; sb.className = "badge bad"; }
   }, function () {
@@ -388,8 +397,8 @@ function saveSoftware() {
   document.getElementById("msg").textContent = "Saving...";
   xhrJson("POST", "/configure", {
     software_process: document.getElementById("softwareProcess").value
-  }, function () {
-    document.getElementById("msg").textContent = "Software process saved.";
+  }, function (d) {
+    document.getElementById("msg").textContent = (d && d.error) ? d.error : "Software process saved.";
     loadStatus();
   }, function () {
     document.getElementById("msg").textContent = "Could not save - is the agent still running?";
@@ -427,7 +436,7 @@ function reportNow() {
       document.getElementById("msg").textContent = d.ok ? "Reported successfully." : ("Failed: " + d.error);
     }, function () {
       document.getElementById("msg").textContent = "Report failed - request timed out or the agent is not responding.";
-    }, 40000);
+    }, 120000);
   }, function () {
     document.getElementById("msg").textContent = "Could not save - is the agent still running?";
   }, 10000);
@@ -504,6 +513,8 @@ def status():
             if d["name"] not in labels or text.startswith("likely"):
                 labels[d["name"]] = text
     return jsonify({
+        "enrollment": {"status": cfg.get("enroll_status", ""), "message": cfg.get("enroll_message", ""),
+                       "csp_id": cfg.get("csp_id", ""), "csp_name": cfg.get("csp_name", "")},
         "device_labels": labels,
         "diagnosis": diagnosis_result,
         "scan_problem": health.get("scan_problem", ""),
@@ -616,6 +627,9 @@ def configure():
     # different from what the server actually stored, so every report is
     # silently rejected as "invalid API key" with no visible sign why.
     data = {k: (v.strip() if isinstance(v, str) else v) for k, v in data.items()}
+    sp = data.get("software_process")
+    if isinstance(sp, str) and sp and not device_health.valid_process_name(sp):
+        return jsonify({"ok": False, "error": "Not saved. " + device_health.PROCESS_NAME_HELP})
     updates = {k: v for k, v in data.items() if k in allowed and v not in (None, "")}
     # An explicitly blank device/software selection should still clear it.
     for k in ("printer_name", "microatm_name", "biometric_name", "gps_name", "software_process"):
@@ -636,6 +650,7 @@ def configure():
 
 @app.route("/report_now", methods=["POST"])
 def report_now():
+    diagnostics.clear_cache()          # a manual check right after fixing something must not reuse old answers
     return jsonify(reporter.report_once())
 
 

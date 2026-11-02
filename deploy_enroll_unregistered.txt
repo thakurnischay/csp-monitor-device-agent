@@ -1,0 +1,52 @@
+Deploy: unregistered CSPs can enroll (they wait for admin approval, marked "Not in registry")
+==========================================================================================
+
+Changed server files (no database/schema change, no agent/installer change):
+  server/registry.py
+  server/api_update.py
+  server/routes_updates.py
+  server/templates/enrollments.html
+
+--- 1. On your Windows PC (Git Bash), copy the 4 files to the indev box --------------------
+# replace USER@INDEV-HOST with the SSH login you normally use for indev
+cd ~/Downloads/csp-device-monitor/server
+scp registry.py api_update.py routes_updates.py USER@INDEV-HOST:/tmp/
+scp templates/enrollments.html USER@INDEV-HOST:/tmp/enrollments.html
+
+--- 2. On the indev box ---------------------------------------------------------------------
+cd ~/pranjal/server
+
+# check the live copies are the ones these changes were made against (only the enrollment changes should show)
+diff registry.py /tmp/registry.py
+diff api_update.py /tmp/api_update.py
+diff routes_updates.py /tmp/routes_updates.py
+diff templates/enrollments.html /tmp/enrollments.html
+# If a diff shows OTHER changes too (the indev copy was patched separately), STOP and send it to me.
+
+# back up, then copy in
+mkdir -p ~/pranjal/backup-$(date +%Y%m%d-%H%M)
+B=$(ls -d ~/pranjal/backup-* | tail -1)
+cp registry.py api_update.py routes_updates.py "$B"/ && cp templates/enrollments.html "$B"/
+cp /tmp/registry.py /tmp/api_update.py /tmp/routes_updates.py . && cp /tmp/enrollments.html templates/
+
+# rebuild + restart (same flags as before; the database file is kept)
+docker build -t pranjal-csp-monitor .
+docker rm -f pranjal-csp-monitor
+docker run -d --name pranjal-csp-monitor --restart unless-stopped \
+  -p 127.0.0.1:5100:5100 \
+  -v ~/pranjal/server/monitor.db:/app/monitor.db \
+  pranjal-csp-monitor
+sleep 3
+docker ps | grep pranjal-csp-monitor
+
+--- 3. Check it worked -----------------------------------------------------------------------
+# An unregistered code must now say "Verified" (verdict not_registered) instead of "not found":
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"csp_id":"TEST-0001","name":"Test Name"}' http://127.0.0.1:5100/api/enroll/verify
+# expected: {"message":"Verified. Your administrator will check your CSP code and name when approving.","ok":true,"verdict":"not_registered"}
+
+--- Rollback (if anything is wrong) ----------------------------------------------------------
+cd ~/pranjal/server
+B=$(ls -d ~/pranjal/backup-* | tail -1)
+cp "$B"/registry.py "$B"/api_update.py "$B"/routes_updates.py . && cp "$B"/enrollments.html templates/
+# then run the same docker build / rm / run commands as in step 2

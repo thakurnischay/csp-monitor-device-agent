@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}AI quality - CSP Device Monitor{% endblock %}
+{% macro chip(ok) -%}
+  {%- if ok is none %}<span class="badge badge-gray"><span class="dot"></span>Not enough data</span>{% elif ok %}<span class="badge badge-green"><span class="dot"></span>On target</span>{% else %}<span class="badge badge-amber"><span class="dot"></span>Below target</span>{% endif -%}
+{%- endmacro %}
+{% macro val(v, unit='') %}{{ (v ~ unit) if v is not none else '-' }}{% endmacro %}
+{% block body %}
+<p class="note"><a href="{{ url_for('ui.email_campaigns') }}" style="color:var(--accent)">&larr; Email Campaigns</a></p>
+<h1>AI drafting quality</h1>
+<p class="note">How well the AI drafting assistant is doing, measured from what people actually did with its drafts (last {{ days }} days).
+  Figures need at least {{ m.min_launched }} launched AI-drafted campaigns before they mean anything.
+  Provider <code>{{ ai.provider }}</code>, model <code>{{ ai.model }}</code>, prompt <code>{{ ai.prompt_version }}</code>, {{ 'switched on' if ai.enabled else 'not switched on' }}.</p>
+
+<div class="panel stack">
+  <table>
+    <thead><tr><th>Measure</th><th>Now</th><th>Target</th><th>Status</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td>Implicit acceptance rate</td><td>{{ val(m.acceptance_rate, '%') }} <span class="note">({{ m.outcomes_at_launch.unchanged }} of {{ m.launched }} launched unchanged; {{ val(m.light_edit_rate, '%') }} within 5%)</span></td><td>&gt; {{ m.targets.acceptance|int }}%</td><td>{{ chip(m.status.acceptance) }}</td><td class="note">Launched drafts identical to what the AI wrote.</td></tr>
+      <tr><td>Correction delta</td><td>{{ val(m.avg_distance_chars, ' chars') }} <span class="note">/ edit ratio {{ val(m.avg_edit_ratio) }}</span></td><td>towards 0 (ratio &le; {{ m.targets.delta_ratio }})</td><td>{{ chip(m.status.delta) }}</td><td class="note">Levenshtein distance between the AI text and the launched text. Trend: {{ m.trend_edit_ratio or '-' }}.</td></tr>
+      <tr><td>Context efficiency</td><td>{{ val(m.avg_input_tokens, ' in') }} / {{ val(m.avg_output_tokens, ' out') }} <span class="note">per draft; {{ val(m.tokens_per_launched_campaign, ' tokens') }} per launched campaign</span></td><td>falling</td><td><span class="badge badge-gray">Trend: {{ m.trend_input_tokens or '-' }}</span></td><td class="note">Tokens spent to get one usable campaign.</td></tr>
+      <tr><td>Retrieval precision</td><td>{{ val(m.retrieval_precision_optional, '%') }}</td><td>&gt; {{ m.targets.precision|int }}%</td><td>{{ chip(m.status.precision) }}</td><td class="note">Optional context the model says it used. <strong>Model-reported</strong>, not independently verified.</td></tr>
+      <tr><td>Human interventions</td><td>{{ val(m.hitl_per_launched) }} <span class="note">per launched ({{ m.edits_saved }} edits saved, {{ m.regenerations }} regenerations)</span></td><td>falling</td><td><span class="badge badge-gray">info</span></td><td class="note">How often people had to step in.</td></tr>
+      <tr><td>Task completion rate</td><td>{{ val(m.completion_rate, '%') }} <span class="note">({{ m.ok }} of {{ m.generations }}{% for k, n in m.failures_by_status.items() %}; {{ n }} {{ k }}{% endfor %})</span></td><td>&gt; {{ m.targets.completion|int }}%</td><td>{{ chip(m.status.completion) }}</td><td class="note">Drafts that produced a usable result.</td></tr>
+      <tr><td>Speed and cost</td><td>{{ val(m.avg_latency_ms, ' ms') }} avg, {{ val(m.p95_latency_ms, ' ms') }} p95; about ${{ m.est_cost_usd }}</td><td>-</td><td><span class="badge badge-gray">info</span></td><td class="note">Cost is an estimate from published prices.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Wording that needs a second look is flagged with a simple keyword check. It is not the model's confidence, which the service does not provide.</p>
+</div>
+
+<h2 style="margin-top:22px">Week by week</h2>
+<div class="panel">
+  <table>
+    <thead><tr><th>Week starting</th><th>Drafts</th><th>Launched</th><th>Acceptance</th><th>Avg edit ratio</th><th>Avg input tokens</th></tr></thead>
+    <tbody>
+    {% for w in m.weekly %}<tr><td>{{ w.week }}</td><td>{{ w.generations }}</td><td>{{ w.launched }}</td><td>{{ val(w.acceptance, '%') }}</td><td>{{ val(w.avg_edit_ratio) }}</td><td>{{ val(w.avg_input_tokens) }}</td></tr>
+    {% else %}<tr><td colspan="6" class="note">No AI drafts yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 style="margin-top:22px">Recent drafts</h2>
+<div class="panel">
+  <table>
+    <thead><tr><th>#</th><th>When</th><th>By</th><th>Result</th><th>Campaign</th><th>Latest edit ratio</th><th>At launch</th><th>Events</th></tr></thead>
+    <tbody>
+    {% for g in recent %}<tr>
+      <td><a href="{{ url_for('ui.email_ai_generation', gid=g.id) }}" style="color:var(--accent)">{{ g.id }}</a></td><td>{{ g.created_at }}</td><td>{{ g.created_by }}</td><td>{{ g.status }}</td>
+      <td>{% if g.campaign_id %}<a href="{{ url_for('ui.email_campaign', cid=g.campaign_id) }}" style="color:var(--accent)">#{{ g.campaign_id }}</a>{% else %}-{% endif %}</td>
+      <td>{{ val(g.last_ratio) }}</td><td>{{ g.launched_outcome or '-' }}</td><td>{{ g.events }}</td></tr>
+    {% else %}<tr><td colspan="8" class="note">Nothing recorded yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 style="margin-top:22px">Golden test set runs</h2>
+<div class="panel">
+  <table>
+    <thead><tr><th>When</th><th>Prompt</th><th>Model</th><th>Mode</th><th>Passed</th></tr></thead>
+    <tbody>
+    {% for r in evals %}<tr><td>{{ r.started_at }}</td><td>{{ r.prompt_version }}</td><td>{{ r.model }}</td><td>{{ r.mode }}</td><td>{{ r.cases_passed }} / {{ r.cases_total }}</td></tr>
+    {% else %}<tr><td colspan="5" class="note">No runs yet. Run <code>python tools/run_ai_eval.py</code>.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

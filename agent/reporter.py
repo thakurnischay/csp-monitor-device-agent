@@ -16,6 +16,9 @@ import requests
 
 import config_store
 import diagnostics
+import enroll
+import outcomes
+import update_client
 import device_health
 from version import AGENT_VERSION, SCHEMA_VERSION
 
@@ -91,6 +94,14 @@ def _safe_hostname() -> str:
         return ""
 
 
+def _update_fields():
+    """capabilities / agent_sequence / update_result for the heartbeat; never allowed to break it."""
+    try:
+        return update_client.payload_extras()
+    except Exception:
+        return {}
+
+
 _MAX_PAYLOAD_BYTES = 150 * 1024        # the server accepts 256 KB; stay well inside it
 
 
@@ -107,16 +118,55 @@ def _fit(payload: dict) -> dict:
             d["checked"], d["not_checked"], d["notes"] = [], [], []
         if len(json.dumps(payload, default=str)) > _MAX_PAYLOAD_BYTES:
             payload["diagnosis"] = {}
+            payload["outcomes"] = []
     except Exception:
         pass
     return payload
 
 
+# A device that was there at the last check and is missing now is checked once more before it is reported as
+# "not connected": a micro-ATM / COM-port printer briefly drops off the USB bus when its own program opens the port
+# or the terminal restarts, and reporting that blip made the dashboard flip between "not connected" and "OK".
+RECHECK_MISSING_SECONDS = 20
+PROBLEM_INTERVAL_SECONDS = 120
+_DEVICES = ("printer", "microatm", "biometric", "gps")
+_last_presence = {}           # device -> present at the previous check (None until the first check)
+_last_problem = False         # the previous report had a configured device that was not OK
+
+
+def _check(cfg):
+    return device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
+                               cfg.get("software_process", ""),
+                               cfg.get("biometric_name", ""), cfg.get("gps_name", ""),
+                               config_store.confirmed_map(cfg))
+
+
+def _just_went_missing(health):
+    return [d for d in _DEVICES
+            if (health.get(d) or {}).get("configured") and not (health.get(d) or {}).get("present")
+            and _last_presence.get(d) is not False]
+
+
+def check_confirmed(cfg, wait=None):
+    """device_health.check(), re-run once after a short wait if a device that was present has gone missing,
+    so a momentary USB re-enumeration is not reported as a disconnection. The newer scan always wins."""
+    global _last_problem
+    health = _check(cfg)
+    missing = _just_went_missing(health)
+    if missing:
+        log.info("not seen this time, re-checking in %ss: %s", RECHECK_MISSING_SECONDS, ", ".join(missing))
+        (wait or _stop_event.wait)(RECHECK_MISSING_SECONDS)
+        health = _check(cfg)
+    for d in _DEVICES:
+        h = health.get(d) or {}
+        _last_presence[d] = bool(h.get("present")) if h.get("configured") else None
+    _last_problem = any((health.get(d) or {}).get("configured") and not (health.get(d) or {}).get("ok")
+                        for d in _DEVICES)
+    return health
+
+
 def build_payload(cfg: dict) -> dict:
-    health = device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""),
-                                 cfg.get("software_process", ""),
-                                 cfg.get("biometric_name", ""), cfg.get("gps_name", ""),
-                                 config_store.confirmed_map(cfg))
+    health = check_confirmed(cfg)
     # Self-configure: a confidently-recognized real device gets saved as the
     # actual selection, not just used transiently for this one check - so a
     # CSP with a recognizable printer and/or micro-ATM needs zero manual setup.
@@ -156,6 +206,8 @@ def build_payload(cfg: dict) -> dict:
         "gps": health["gps"],
         "printer_functional_test": functional,
         "diagnosis": diagnosis,
+        "outcomes": outcomes.report_rows(),
+        **_update_fields(),
     })
 
 
@@ -169,6 +221,13 @@ def report_once() -> dict:
     interval, same as before. Never retries on a 401 (a bad key won't fix
     itself by trying again)."""
     cfg = config_store.load()
+    # A brand-new PC waits here until the administrator approves it (it never sends a heartbeat before that);
+    # an established agent (enroll_status "") and an approved one go straight on.
+    if cfg.get("enroll_status") not in ("", "approved", None):
+        if not enroll.maintain(cfg):
+            state = config_store.load()
+            return {"ok": False, "error": state.get("enroll_message") or "waiting for the administrator to approve this PC"}
+        cfg = config_store.load()
     if not config_store.is_registered(cfg):
         return {"ok": False, "error": "agent not registered yet — set server URL, "
                                        "CSP ID and API key in the local status page"}
@@ -188,6 +247,14 @@ def report_once() -> dict:
                 return {"ok": False, "error": "server rejected the API key (401) — "
                                                "check CSP ID / API key in the status page"}
             r.raise_for_status()
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            try:        # acknowledge a delivered update outcome / start an offered update (background thread)
+                update_client.handle_heartbeat_response(cfg, body if isinstance(body, dict) else {}, "update_result" in payload)
+            except Exception:
+                log.exception("update hook failed (the heartbeat itself succeeded)")
             return {"ok": True, "payload": payload}
         except requests.RequestException as e:
             last_error = str(e)
@@ -209,6 +276,10 @@ def _loop():
         else:
             log.warning("report failed: %s", result["error"])
         interval = max(30, int(cfg.get("interval_seconds", 300)))
+        if _last_problem:
+            interval = min(interval, PROBLEM_INTERVAL_SECONDS)   # something is wrong: show the fix (or the cause) sooner
+        if config_store.load().get("enroll_status") in ("pending", "error"):
+            interval = 30                      # waiting for approval: check often so monitoring starts promptly
         _stop_event.wait(interval)
     log.info("reporter loop stopped")
 

@@ -19,9 +19,16 @@ import signal
 import sys
 from logging.handlers import RotatingFileHandler
 
+import apply_update
+
+# FIRST, before any other agent module is imported: if an update was interrupted half-way (power cut, crash) put the
+# backed-up files back, so the agent never starts on a mixture of old and new code.
+apply_update.recover_if_needed(os.path.dirname(os.path.abspath(__file__)))
+
 import reporter
 import local_ui
 import singleton
+import update_client
 
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.log")
 
@@ -36,6 +43,20 @@ def _handle_shutdown_signal(signum, frame):
     reporter.stop_background()
     singleton.release()
     sys.exit(0)
+
+
+def _verify_update():
+    import config_store
+    import device_health
+
+    def local_check():
+        cfg = config_store.load()
+        device_health.check(cfg.get("printer_name", ""), cfg.get("microatm_name", ""), cfg.get("software_process", ""),
+                            cfg.get("biometric_name", ""), cfg.get("gps_name", ""))
+    try:
+        update_client.post_start_verification(run_check=local_check)
+    except Exception:
+        logging.getLogger("csp_agent").exception("post-update verification crashed")
 
 
 def main():
@@ -55,6 +76,9 @@ def main():
         pass  # not every platform/thread context supports this - non-fatal
 
     reporter.start_background()
+    # If this process IS a freshly installed version, prove it works and tell the updater (which rolls back otherwise).
+    import threading
+    threading.Thread(target=_verify_update, daemon=True, name="csp-agent-update-verify").start()
     try:
         local_ui.run()
     finally:

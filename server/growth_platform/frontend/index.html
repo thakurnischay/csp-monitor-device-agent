@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CSP Growth Platform</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="assets/favicon.ico" />
+<!-- Inter + Plus Jakarta Sans, the faces kiosk.eko.in serves. preconnect +
+     display=swap so a slow or failed font fetch never blocks the dashboard
+     rendering - style.css keeps a full system fallback stack behind it. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topnav">
+  <div class="topnav-inner">
+    <a class="logo" href="#overview" aria-label="Eko Kiosk"><img src="assets/eko-kiosk-logo.svg" alt="Eko Kiosk" /></a>
+
+    <nav class="nav" aria-label="Sections">
+      <button class="navitem active" data-tab="overview"><span>Overview</span></button>
+      <button class="navitem" data-tab="targets"><span>Target queues</span><em id="badgeTargets"></em></button>
+      <button class="navitem" data-tab="disputed"><span>Reconciliation</span><em id="badgeDisputed" class="warn"></em></button>
+      <button class="navitem" data-tab="orders"><span>Orders</span><em id="badgeOrders" class="warn"></em></button>
+      <button class="navitem" data-tab="segments"><span>Segments &amp; RMs</span></button>
+      <button class="navitem" data-tab="messages"><span>Messages</span><em id="badgeMessages"></em></button>
+      <button class="navitem" data-tab="activity"><span>Activity</span></button>
+      <button class="navitem" data-tab="directory"><span>CSP Directory</span></button>
+    </nav>
+
+    <div class="topnav-right">
+      <a class="btn" href="__CONSOLE_URL__">&larr; Console</a>
+      <span id="modePill" class="modepill">…</span>
+      <button class="btn primary" id="navSendBtn" onclick="location.hash='targets'">Send campaign</button>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+  <header class="pagehead">
+    <div class="pagehead-inner">
+      <h1 id="pageTitle">Overview</h1>
+      <p class="crumb" id="pageSub">Where the programme is against target</p>
+    </div>
+  </header>
+
+  <div class="scroll">
+    <section id="blocker" class="alert hidden"></section>
+
+    <section class="cards" id="coverage"></section>
+
+    <!-- Overview: the scoreboard. Charts only - every raw list lives on a
+         tab of its own, so landing here answers "where are we" before it
+         shows anyone a row of data. -->
+    <section class="pane" id="pane-overview">
+      <section id="trackingWarn" class="alert hidden"></section>
+
+      <div class="chartgrid">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Coverage against target</h2>
+              <p class="sub">How much of the active base owns each device</p>
+            </div>
+          </div>
+          <div id="coverageBars"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Campaign funnel</h2>
+              <p class="sub">Distinct CSPs reaching each stage</p>
+            </div>
+          </div>
+          <div id="funnelChart"></div>
+        </div>
+      </div>
+
+      <div class="chartgrid">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Emails sent per day</h2>
+              <p class="sub" id="sendsNote"></p>
+            </div>
+          </div>
+          <div id="sendsChart"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>Where CSPs are in the sequence</h2>
+              <p class="sub">Sends at each step of the 8-email schedule</p>
+            </div>
+          </div>
+          <div id="touchChart"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Coverage over time</h2>
+            <p class="sub" id="trendNote"></p>
+          </div>
+        </div>
+        <div id="trendChart"></div>
+      </div>
+    </section>
+
+    <!-- Targets -->
+    <section class="pane hidden" id="pane-targets">
+      <div class="card" id="sendCard">
+        <div class="card-head">
+          <div>
+            <h2>Send campaign emails</h2>
+            <p class="sub" id="sendCardNote">Who the next send reaches, and nothing else.</p>
+          </div>
+        </div>
+        <div class="grid2" id="sendGrid"></div>
+      </div>
+
+      <details class="card details-card">
+        <summary>
+          <div>
+            <h2 style="display:inline">Full ranked list</h2>
+            <p class="sub" id="queueNote" style="display:inline;margin-left:10px"></p>
+          </div>
+        </summary>
+        <div class="card-head" style="padding-top:0">
+          <div></div>
+          <div class="seg" id="queueSwitch">
+            <button class="segbtn active" data-q="PRINTER">Passbook Printer</button>
+            <button class="segbtn" data-q="MATM">Micro ATM</button>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table id="queueTable">
+            <thead><tr>
+              <th style="width:56px">Rank</th><th>CSP</th><th>RM</th><th>Location</th>
+              <th class="r">Commission</th><th class="r">Txns</th><th>Signal</th><th>Affordability</th>
+              <th>Send status</th><th>Preview</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <!-- Reconciliation -->
+    <section class="pane hidden" id="pane-disputed">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Data reconciliation</h2>
+            <p class="sub">Marked as not owning a device, but their own transactions say otherwise.
+              Held out of every campaign until a human settles it — confirm by phone, or by email below,
+              then record it here.</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="confirmModePill" class="modepill">…</span>
+            <button id="confirmPreviewBtn" class="btn ghost">
+              <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              Preview email
+            </button>
+            <button id="confirmSendBtn" class="btn primary">
+              <svg viewBox="0 0 24 24"><path d="m4 12 16-8-6 16-2.5-6.5L4 12Z"/></svg>
+              Send confirmation emails
+            </button>
+          </div>
+        </div>
+        <section id="confirmAlert" class="alert hidden" style="margin:0 20px 16px"></section>
+        <div class="tablewrap">
+          <table id="disputedTable">
+            <thead><tr>
+              <th>CSP</th><th>RM</th><th class="r">Commission</th>
+              <th class="r">mATM txns recorded</th><th>Sheet claims</th>
+              <th>Send status</th><th style="width:170px">Resolve</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Orders -->
+    <section class="pane hidden" id="pane-orders">
+      <section class="cards" id="orderStats"></section>
+
+      <section class="alert hidden" id="formSetupAlert"></section>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Orders</h2>
+            <p class="sub">SUBMITTED waits on finance typing a remark in the response sheet's
+              Finance Remark column (not this dashboard); Verified → Dispatched → Delivered then
+              advance on a timer. Ownership only updates once an order reaches <b>Delivered</b>.
+              Override buttons exist for the rare exception, not the normal path.
+              <b>Click a row</b> for the delivery address and everything else the CSP submitted.</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="seg" id="orderFilter">
+              <button class="segbtn active" data-status="">All</button>
+              <button class="segbtn" data-status="SUBMITTED">Submitted</button>
+              <button class="segbtn" data-status="PAYMENT_VERIFIED">Verified</button>
+              <button class="segbtn" data-status="DISPATCHED">Dispatched</button>
+              <button class="segbtn" data-status="DELIVERED">Delivered</button>
+            </div>
+            <button id="importResponsesBtn" class="btn ghost">Import responses</button>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table id="ordersTable">
+            <thead><tr>
+              <th>Order</th><th>CSP</th><th>Product</th><th class="r">Price</th>
+              <th>UTR</th><th>Status</th><th>Next</th><th style="width:160px">Override</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Segments -->
+    <section class="pane hidden" id="pane-segments">
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><div><h2>Affordability bands</h2><p class="sub">Active CSPs, by what they can actually pay</p></div></div>
+          <table id="bandTable"><thead><tr><th>Band</th><th class="r">CSPs</th><th>Treatment</th></tr></thead><tbody></tbody></table>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>RM workload</h2><p class="sub">Queued conversations per manager</p></div></div>
+          <table id="rmTable"><thead><tr><th>RM</th><th class="r">Micro ATM</th><th class="r">Printer</th><th class="r">Total</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Messages -->
+    <section class="pane hidden" id="pane-messages">
+      <section class="cards" id="messageStats"></section>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Message tracking</h2>
+            <p class="sub">Every message sent to a CSP, across every channel — who got it, who opened it, who it failed for.</p>
+          </div>
+          <div class="headctrls">
+            <input class="msgsearch" type="text" id="messageSearch" placeholder="Search name or CSP code…" />
+            <div class="seg" id="messageChannelFilter">
+              <button class="segbtn active" data-channel="">All channels</button>
+              <button class="segbtn" data-channel="EMAIL">Email</button>
+              <button class="segbtn" data-channel="WHATSAPP">WhatsApp</button>
+            </div>
+          </div>
+        </div>
+
+        <section id="messageTrackingAlert" class="alert serious" style="margin:0 22px 18px"></section>
+
+        <div class="tablewrap">
+          <table id="messagesTable">
+            <thead><tr>
+              <th>CSP</th><th>Channel</th><th>Touch</th><th>Sent</th><th>Opened</th><th>Clicked link</th><th>Status</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="pager" id="messagesPager">
+          <span class="pager-range" id="messagesPagerRange"></span>
+          <div class="pager-btns" id="messagesPagerBtns"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Activity -->
+    <section class="pane hidden" id="pane-activity">
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><div><h2>Messages sent</h2><p class="sub">Most recent first</p></div></div>
+          <ul id="outreachLog" class="feed"></ul>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>Audit trail</h2><p class="sub">Every decision the platform recorded</p></div></div>
+          <ul id="auditLog" class="feed"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- CSP Directory -->
+    <section class="pane hidden" id="pane-directory">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>CSP Directory</h2>
+            <p class="sub">Every CSP in the base - active, dormant, and inactive - not just who's currently targeted</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="directorySearch" type="text" placeholder="Search name or CSP code…"
+                   style="padding:8px 12px;border:1px solid #e3e8ef;border-radius:8px;font-size:13.5px;width:220px" />
+            <div class="seg" id="directoryFilter">
+              <button class="segbtn active" data-status="">All</button>
+              <button class="segbtn" data-status="ACTIVE">Active</button>
+              <button class="segbtn" data-status="DORMANT">Dormant</button>
+              <button class="segbtn" data-status="INACTIVE">Inactive</button>
+            </div>
+          </div>
+        </div>
+        <p class="sub" id="directoryNote" style="margin:0 20px 12px"></p>
+        <div class="tablewrap">
+          <table id="directoryTable">
+            <thead><tr>
+              <th>CSP</th><th>RM</th><th>Location</th><th>Status</th>
+              <th class="r">Commission</th><th class="r">Txns</th>
+              <th>Micro ATM</th><th>Passbook Printer</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+  <footer class="pagefoot"><div id="sourceLine">Loading…</div></footer>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- Order detail. Outside <main> because it's a fixed overlay, not part of
+     the Orders pane's flow - the pane is display:none on every other tab and
+     the drawer has to be able to close itself cleanly regardless. Filled in
+     by app.js's openOrderDrawer(); empty until a row is clicked. -->
+<div class="scrim" id="orderScrim"></div>
+<aside class="drawer" id="orderDrawer" aria-label="Order detail" aria-hidden="true"></aside>
+
+<script src="app.js"></script>
+</body>
+</html>

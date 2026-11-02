@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "_campaign_macros.html" import message_badge, campaign_badge, mode_badge, device_list %}
+{% block title %}{{ c.name }} - Email Campaigns{% endblock %}
+{% block body %}
+{% set eligible_n = counts.get('eligible', 0) %}
+<p class="note"><a href="{{ url_for('ui.email_campaigns') }}" style="color:var(--accent)">&larr; Email Campaigns</a></p>
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+  <h1>{{ c.name }} <span style="font-size:0.9rem">{{ campaign_badge(c.status) }} {{ mode_badge(c.mode) }}</span></h1>
+  <div style="display:flex;gap:8px">{% if can_edit %}<a class="btn btn-outline" href="{{ url_for('ui.email_campaign_edit', cid=c.id) }}">Edit</a>{% endif %}<a class="btn btn-outline" href="{{ url_for('ui.email_campaign', cid=c.id, view=view) }}">Refresh</a></div>
+</div>
+{% if c.description %}<p class="note">{{ c.description }}</p>{% endif %}
+
+<div class="panel">
+  <div class="two-col">
+    <div>
+      <p style="margin:0 0 6px"><strong>Occasion:</strong> {{ c.occasion }}</p>
+      <p style="margin:0 0 6px"><strong>Audience:</strong> operators without {{ 'at least one of' if c.audience_match == 'any' else 'every one of' }}: {{ device_list(c.devices, device_labels) }}{% if c.include_dormant %} (dormant operators included){% endif %}</p>
+      <p style="margin:0 0 6px"><strong>Subject:</strong> {{ c.subject }}</p>
+      <p class="note" style="margin:0">Created {{ c.created_at | ist }} by {{ c.created_by or '-' }}{% if c.launched_at %} &middot; launched {{ c.launched_at | ist }} by {{ c.launched_by }}{% endif %}{% if c.status == 'scheduled' %} &middot; starts {{ c.scheduled_at | ist }}{% endif %}</p>
+    </div>
+    <div>
+      <p style="margin:0 0 6px"><strong>Eligible:</strong> {{ eligible_n }} &nbsp; <strong>To review:</strong> {{ counts.get('review', 0) }} &nbsp; <strong>Excluded:</strong> {{ counts.get('excluded', 0) }}</p>
+      {% if can_edit %}<p class="note" style="margin:0">This is the live audience; it is frozen when you launch. {% if not operators_loaded %}<strong>No operator data is imported yet.</strong>{% endif %}</p>{% endif %}
+      {% if progress %}
+        <p style="margin:6px 0 4px"><strong>Progress:</strong> {{ progress.done }} of {{ progress.sendable }} ({{ progress.percent }}%)</p>
+        <div style="background:#e2e8f0;border-radius:99px;height:8px;overflow:hidden"><div style="width:{{ progress.percent }}%;height:8px;background:var(--brand-teal)"></div></div>
+        <p class="note" style="margin-top:6px">Accepted by mail server {{ progress.counts.get('accepted', 0) }} &middot; delivered (confirmed) {{ progress.delivered_confirmed }} &middot; bounced {{ progress.bounced }} &middot; failed {{ progress.counts.get('failed', 0) }} &middot; waiting {{ progress.counts.get('queued', 0) + progress.counts.get('sending', 0) }} &middot; need review {{ progress.counts.get('unknown_outcome', 0) }} &middot; opened {{ progress.opened }} &middot; clicked {{ progress.clicked }}</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if can_edit %}
+<div class="two-col">
+  <div class="panel stack">
+    <h2 style="font-size:1.05rem">1. Preview</h2>
+    <form method="get"><label for="csp_code">Preview as operator (optional CSP code)</label>
+      <input id="csp_code" name="preview_for" value="{{ request.args.get('preview_for', '') }}" placeholder="first eligible operator" style="width:60%"> <button class="btn btn-outline btn-sm" type="submit">Preview</button></form>
+    <iframe class="preview-frame" sandbox="" title="Email preview" src="{{ url_for('ui.email_campaign_preview_frame', cid=c.id, csp_code=request.args.get('preview_for') or None) }}"></iframe>
+    <p class="note">A preview shows real text for the chosen operator but loads no images and records nothing.</p>
+  </div>
+  <div class="panel stack">
+    <h2 style="font-size:1.05rem">2. Check before sending</h2>
+    <form method="post" action="{{ url_for('ui.email_campaign_action', cid=c.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline" name="action" value="dry_run" type="submit">Run a dry run</button>
+      <span class="note">composes every email, sends nothing</span></form>
+    {% if outcome.last_dry_run %}<div class="banner banner-dry" style="margin:0">Last dry run ({{ outcome.last_dry_run.at | ist }}): <strong>{{ outcome.last_dry_run.would_send }}</strong> email(s) would be sent{% if outcome.last_dry_run.problems %}, <strong>{{ outcome.last_dry_run.problems | length }}</strong> problem(s){% endif %}. {{ outcome.last_dry_run.note }}</div>{% endif %}
+    <form method="post" action="{{ url_for('ui.email_campaign_action', cid=c.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="test">
+      <label for="test_to">Send a test email to</label>
+      <input id="test_to" name="test_to" type="email" placeholder="you@example.com" style="width:60%"> <button class="btn btn-outline btn-sm" type="submit">Send test</button>
+      <p class="note">{% if settings.live_enabled %}A real email is sent to that one address, marked [TEST].{% else %}In dry mode nothing is sent; you only see the result.{% endif %}</p></form>
+    <form method="post" action="{{ url_for('ui.email_campaign_action', cid=c.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline btn-sm" name="action" value="refresh" type="submit">Refresh audience now</button></form>
+
+    <h2 style="font-size:1.05rem;margin-top:18px">3. Launch</h2>
+    {% if settings.blockers %}
+      <div class="banner banner-dry" style="margin:0">Live sending is not available yet: <ul style="margin:6px 0 0 18px">{% for b in settings.blockers %}<li>{{ b }}</li>{% endfor %}</ul>Use the dry run until an administrator has configured the server.</div>
+    {% elif eligible_n == 0 %}
+      <p class="note">There are no eligible recipients, so there is nothing to launch.</p>
+    {% else %}
+    <form method="post" action="{{ url_for('ui.email_campaign_action', cid=c.id) }}" class="stack" data-confirm="This will send REAL emails to {{ eligible_n }} operators. Continue?">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="launch">
+      <div class="banner banner-live" style="margin:0">Launching sends <strong>real email to {{ eligible_n }} operator(s)</strong> in batches of {{ settings.max_per_run }}. Each can unsubscribe. You can pause or cancel unsent messages, but an email the mail server has accepted cannot be recalled.</div>
+      <div><label for="confirm_text">To confirm, type the number of recipients ({{ eligible_n }})</label><input id="confirm_text" name="confirm_text" autocomplete="off" style="width:120px"></div>
+      <div><label><input type="checkbox" data-toggle-target="schedule-box"> Schedule it for later instead of starting now</label>
+        <div id="schedule-box" style="display:none;margin-top:6px"><label for="schedule_at">Start at (IST)</label> <input id="schedule_at" type="datetime-local" name="schedule_at"></div></div>
+      <button class="btn btn-danger" type="submit">Launch live campaign</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="panel">
+  <h2 style="font-size:1.05rem">Controls</h2>
+  <form method="post" action="{{ url_for('ui.email_campaign_action', cid=c.id) }}" style="display:flex;gap:8px;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if c.status in ('scheduled', 'queued', 'sending') %}<button class="btn btn-outline" name="action" value="pause" type="submit">Pause</button>{% endif %}
+    {% if c.status == 'paused' %}<button class="btn btn-primary" name="action" value="resume" type="submit">Resume</button>{% endif %}
+    {% if c.status not in ('completed', 'cancelled') %}<button class="btn btn-danger" name="action" value="cancel" type="submit" data-confirm="Cancel this campaign? Unsent messages will not be sent. Messages already accepted cannot be recalled.">Cancel campaign</button>{% endif %}
+    {% if progress and progress.counts.get('failed', 0) %}<button class="btn btn-outline" name="action" value="retry" type="submit">Retry failed ({{ progress.counts.get('failed', 0) }})</button>{% endif %}
+    {% if progress and progress.counts.get('unknown_outcome', 0) %}<button class="btn btn-outline" name="action" value="retry_unknown" type="submit" data-confirm="These messages MAY already have been delivered (the server stopped mid-send). Retrying could send a second copy. Retry anyway?">Retry unknown outcome ({{ progress.counts.get('unknown_outcome', 0) }})</button>{% endif %}
+  </form>
+  <p class="note">A failed message is retried automatically a few times; permanent failures (for example an address the mail server refuses) are not retried. {% if c.config_snapshot_json %}<details><summary>Configuration recorded at launch</summary><pre style="white-space:pre-wrap;font-size:0.8rem">{{ c.config_snapshot_json }}</pre></details>{% endif %}</p>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2 style="font-size:1.05rem">Audience</h2>
+  <div class="tabs">
+    {% for key, label in (('eligible', 'Eligible'), ('review', 'To review'), ('excluded', 'Excluded')) %}
+      <a href="{{ url_for('ui.email_campaign', cid=c.id, view=key) }}" class="{{ 'active' if view == key }}">{{ label }} ({{ counts.get(key, 0) }})</a>
+    {% endfor %}
+  </div>
+  <p class="note">{% if view == 'review' %}Ownership of a selected device is unknown or in conflict. These operators are <strong>not</strong> emailed; someone should confirm (phone call) and record the answer on the <a href="{{ url_for('ui.email_operators') }}">Operators</a> page.{% elif view == 'excluded' %}Each operator below is shown with the reason they are not emailed.{% else %}These operators will receive the email. Each row says why.{% endif %}</p>
+  {% if not rows %}<p class="note">No operators in this group.</p>{% else %}
+  <div class="table-wrap"><table><thead><tr><th>CSP code</th><th>Operator</th><th>Email</th><th>Location</th><th>RM</th><th>Why</th>{% if not can_edit %}<th>Email status</th>{% endif %}</tr></thead><tbody>
+  {% for r in rows %}
+    <tr><td><strong>{{ r.csp_code }}</strong></td><td>{{ r.name }}</td><td class="note">{{ r.email_masked }}</td><td>{{ r.location or '-' }}</td><td>{{ r.rm or '-' }}</td>
+      <td class="note">{{ r.reason }}</td>
+      {% if not can_edit %}<td>{% if r.id and r.status and r.status != 'Not sent' %}<a href="{{ url_for('ui.email_message', rid=r.id) }}">{{ r.status }}</a>{% else %}-{% endif %}</td>{% endif %}</tr>
+  {% endfor %}
+  </tbody></table></div>
+  <div class="pager">
+    {% if paging.page > 1 %}<a class="btn btn-outline btn-sm" href="{{ url_for('ui.email_campaign', cid=c.id, view=view, page=paging.page - 1) }}">&larr; Previous</a>{% endif %}
+    <span>Page {{ paging.page }} of {{ paging.pages }} ({{ paging.total }})</span>
+    {% if paging.page < paging.pages %}<a class="btn btn-outline btn-sm" href="{{ url_for('ui.email_campaign', cid=c.id, view=view, page=paging.page + 1) }}">Next &rarr;</a>{% endif %}
+  </div>
+  {% endif %}
+  <p class="note">{{ suppressed }} address(es) are on the opt-out list and are never emailed.</p>
+</div>
+{% endblock %}
